@@ -1,0 +1,255 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Lembrete</title>
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: 'DM Sans', system-ui, sans-serif;
+      background: transparent;
+      overflow: hidden;
+      user-select: none;
+    }
+
+    .reminder-popup {
+      width: 360px;
+      background: #1c1c26;
+      border: 1px solid #3a3a4e;
+      border-radius: 16px;
+      box-shadow: 0 20px 60px rgba(0,0,0,0.8), 0 0 0 1px rgba(108,99,255,0.3);
+      overflow: hidden;
+      animation: popIn 0.4s cubic-bezier(0.34, 1.56, 0.64, 1);
+    }
+
+    @keyframes popIn {
+      from { opacity: 0; transform: translateX(40px) scale(0.9); }
+      to { opacity: 1; transform: translateX(0) scale(1); }
+    }
+
+    .popup-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 12px 14px 10px;
+      background: #16161d;
+      border-bottom: 1px solid #2e2e3e;
+    }
+
+    .popup-brand {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 12px;
+      font-weight: 600;
+      color: #6C63FF;
+      letter-spacing: 0.5px;
+      text-transform: uppercase;
+    }
+
+    .popup-logo {
+      width: 20px; height: 20px;
+    }
+
+    .popup-time {
+      font-size: 11px;
+      color: #5a5a78;
+      font-variant-numeric: tabular-nums;
+    }
+
+    .popup-body {
+      padding: 14px 16px;
+    }
+
+    .popup-priority {
+      display: inline-block;
+      font-size: 10px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.8px;
+      padding: 2px 8px;
+      border-radius: 10px;
+      margin-bottom: 8px;
+    }
+
+    .priority-high { background: #FF4D6D18; color: #FF4D6D; }
+    .priority-normal { background: #6C63FF18; color: #6C63FF; }
+    .priority-low { background: #23232f; color: #5a5a78; }
+
+    .popup-title {
+      font-size: 15px;
+      font-weight: 600;
+      color: #e8e8f0;
+      line-height: 1.3;
+      margin-bottom: 4px;
+    }
+
+    .popup-desc {
+      font-size: 12px;
+      color: #9898b8;
+      line-height: 1.5;
+      margin-bottom: 12px;
+    }
+
+    .popup-note-link {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 12px;
+      color: #6C63FF;
+      margin-bottom: 12px;
+      cursor: pointer;
+    }
+
+    .popup-note-link:hover { text-decoration: underline; }
+
+    .popup-actions {
+      display: flex;
+      gap: 8px;
+    }
+
+    .popup-btn {
+      flex: 1;
+      height: 34px;
+      border-radius: 8px;
+      border: none;
+      font-family: 'DM Sans', system-ui, sans-serif;
+      font-size: 12px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.15s ease;
+    }
+
+    .btn-dismiss {
+      background: #23232f;
+      color: #9898b8;
+      border: 1px solid #2e2e3e;
+    }
+
+    .btn-dismiss:hover { background: #2a2a38; color: #e8e8f0; }
+
+    .btn-view {
+      background: #6C63FF;
+      color: white;
+      box-shadow: 0 3px 0 rgba(0,0,0,0.3), 0 4px 10px rgba(108,99,255,0.4);
+    }
+
+    .btn-view:hover { background: #8a83ff; transform: translateY(-1px); }
+    .btn-view:active { transform: translateY(1px); box-shadow: 0 1px 0 rgba(0,0,0,0.3); }
+
+    .color-accent {
+      position: absolute;
+      top: 0; left: 0; right: 0;
+      height: 3px;
+      border-radius: 16px 16px 0 0;
+    }
+  </style>
+</head>
+<body>
+  <div class="reminder-popup" id="popup">
+    <div class="color-accent" id="color-accent"></div>
+    <div class="popup-header">
+      <div class="popup-brand">
+        <svg class="popup-logo" viewBox="0 0 40 40" fill="none">
+          <circle cx="20" cy="20" r="18" stroke="#6C63FF" stroke-width="2"/>
+          <path d="M12 20 Q20 10 28 20 Q20 30 12 20Z" fill="#6C63FF" opacity="0.8"/>
+          <circle cx="20" cy="20" r="4" fill="#6C63FF"/>
+        </svg>
+        🔔 Lembrete Lumina
+      </div>
+      <span class="popup-time" id="popup-time"></span>
+    </div>
+    <div class="popup-body">
+      <div class="popup-priority" id="popup-priority">Normal</div>
+      <div class="popup-title" id="popup-title">Título do lembrete</div>
+      <div class="popup-desc" id="popup-desc"></div>
+      <div class="popup-note-link" id="popup-note-link" style="display:none" onclick="goToNote()">
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z"/></svg>
+        Ver nota vinculada
+      </div>
+      <div class="popup-actions">
+        <button class="popup-btn btn-dismiss" onclick="dismiss()">Dispensar</button>
+        <button class="popup-btn btn-view" onclick="viewReminder()">Ver detalhes</button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    let reminderData = null;
+
+    function init() {
+      const params = new URLSearchParams(window.location.search);
+      const dataStr = params.get('data');
+      if (dataStr) {
+        try {
+          reminderData = JSON.parse(decodeURIComponent(dataStr));
+          render(reminderData);
+        } catch(e) {
+          console.error('Erro ao parsear dados:', e);
+        }
+      }
+      updateTime();
+      setInterval(updateTime, 1000);
+
+      // Auto-dismiss em 30 segundos
+      setTimeout(dismiss, 30000);
+    }
+
+    function render(data) {
+      document.getElementById('popup-title').textContent = data.title || 'Lembrete';
+      document.getElementById('popup-desc').textContent = data.description || '';
+      document.getElementById('popup-desc').style.display = data.description ? 'block' : 'none';
+
+      const priority = data.priority || 'normal';
+      const priorityEl = document.getElementById('popup-priority');
+      const labels = { high: 'Alta prioridade', normal: 'Normal', low: 'Baixa' };
+      priorityEl.textContent = labels[priority] || 'Normal';
+      priorityEl.className = `popup-priority priority-${priority}`;
+
+      const color = data.color || '#6C63FF';
+      document.getElementById('color-accent').style.background = color;
+      document.querySelector('.btn-view').style.background = color;
+      document.querySelector('.btn-view').style.boxShadow = `0 3px 0 rgba(0,0,0,0.3), 0 4px 10px ${color}66`;
+
+      if (data.note_id) {
+        document.getElementById('popup-note-link').style.display = 'flex';
+        document.getElementById('popup-note-link').style.color = color;
+      }
+    }
+
+    function updateTime() {
+      const now = new Date();
+      document.getElementById('popup-time').textContent = now.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+    }
+
+    function dismiss() {
+      document.getElementById('popup').style.animation = 'popOut 0.25s ease forwards';
+      setTimeout(() => {
+        if (reminderData) window.lumina?.reminder?.dismiss(reminderData.id);
+        window.close();
+      }, 250);
+    }
+
+    function viewReminder() {
+      if (reminderData) window.lumina?.reminder?.dismiss(reminderData.id);
+      window.close();
+    }
+
+    function goToNote() {
+      if (reminderData?.note_id) {
+        window.lumina?.reminder?.openNote(reminderData.note_id);
+        dismiss();
+      }
+    }
+
+    const style = document.createElement('style');
+    style.textContent = `@keyframes popOut { to { opacity: 0; transform: translateX(40px) scale(0.9); } }`;
+    document.head.appendChild(style);
+
+    document.addEventListener('DOMContentLoaded', init);
+  </script>
+</body>
+</html>

@@ -147,7 +147,10 @@
         CREATE INDEX IF NOT EXISTS idx_events_date ON calendar_events(user_id, event_date);
         CREATE INDEX IF NOT EXISTS idx_versions_note ON note_versions(note_id, created_at DESC);
       `);
-      await run('INSERT OR IGNORE INTO schema_migrations(version, applied_at) VALUES(2, ?)', [agora()]);
+      // `run()` aguarda `dbReady`, que é esta mesma Promise durante o primeiro
+      // boot. Usar o plugin diretamente evita o deadlock que deixava o APK
+      // preso em "Preparando seu espaço…".
+      await SQLite.run({ database: DB, statement: 'INSERT OR IGNORE INTO schema_migrations(version, applied_at) VALUES(2, ?)', values: [agora()], transaction: true, readonly: false, returnMode: 'no' });
       await configurarNotificacoes();
       return true;
     })();

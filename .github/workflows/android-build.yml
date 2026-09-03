@@ -21,11 +21,12 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
-      - name: Validar JavaScript
+      - name: Validar JavaScript e scripts
         shell: bash
         run: |
           set -euo pipefail
           find src scripts -name '*.js' -print0 | xargs -0 -n1 node --check
+          bash -n scripts/android-smoke.sh
           node -e "JSON.parse(require('fs').readFileSync('package.json')); JSON.parse(require('fs').readFileSync('capacitor.config.json'));"
       - name: Validar bootstrap Android corrigido
         shell: bash
@@ -101,35 +102,7 @@ jobs:
           profile: pixel_6
           disable-animations: true
           disable-linux-hw-accel: false
-          script: |
-            set -eu
-            adb logcat -c
-            adb install -r Lumina-Notes.apk
-            adb shell am force-stop com.lumina.notes
-            adb shell am start -W -n com.lumina.notes/.MainActivity
-            BOOT_OK=0
-            i=1
-            while [ "$i" -le 25 ]; do
-              if adb logcat -d | grep -F "[Lumina] Android v2.1 pronto" >/dev/null 2>&1; then
-                BOOT_OK=1
-                break
-              fi
-              sleep 1
-              i=$((i + 1))
-            done
-            adb logcat -d > lumina-android-logcat.txt
-            PID=$(adb shell pidof com.lumina.notes | tr -d '\r' || true)
-            test -n "$PID"
-            if grep -E "FATAL EXCEPTION|Process: com\.lumina\.notes.*has died" lumina-android-logcat.txt; then
-              echo "Falha nativa detectada no logcat"
-              exit 1
-            fi
-            if [ "$BOOT_OK" -ne 1 ]; then
-              echo "O app abriu, mas o bootstrap não chegou a 100%."
-              grep -E "Lumina|chromium|Capacitor|SQLite" lumina-android-logcat.txt | tail -n 250 || true
-              exit 1
-            fi
-            echo "Bootstrap Android confirmado: 100% e processo ativo ($PID)."
+          script: bash scripts/android-smoke.sh
       - name: Publicar log do teste Android
         if: always()
         uses: actions/upload-artifact@v4

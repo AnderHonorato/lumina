@@ -156,7 +156,7 @@ jobs:
           node scripts/configure-ios.js
       - name: Compilar app iOS para simulador
         run: |
-          xcodebuild -workspace ios/App/App.xcworkspace -scheme App -sdk iphonesimulator -configuration Debug -derivedDataPath ios/build CODE_SIGNING_ALLOWED=NO build
+          xcodebuild -project ios/App/App.xcodeproj -scheme App -sdk iphonesimulator -configuration Debug -derivedDataPath ios/build CODE_SIGNING_ALLOWED=NO build
       - name: Publicar app iOS para simulador
         uses: actions/upload-artifact@v4
         with:

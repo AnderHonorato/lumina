@@ -1,0 +1,27 @@
+{
+  "appId": "com.lumina.notes",
+  "appName": "Lumina Notes",
+  "webDir": "src/renderer",
+  "bundledWebRuntime": false,
+  "android": {
+    "allowMixedContent": false,
+    "backgroundColor": "#0f0f13",
+    "captureInput": true,
+    "webContentsDebuggingEnabled": false
+  },
+  "plugins": {
+    "SplashScreen": {
+      "launchShowDuration": 900,
+      "launchAutoHide": true,
+      "backgroundColor": "#0f0f13",
+      "showSpinner": false,
+      "androidScaleType": "CENTER_CROP",
+      "splashFullScreen": true,
+      "splashImmersive": true
+    },
+    "LocalNotifications": {
+      "smallIcon": "ic_stat_lumina",
+      "iconColor": "#6C63FF"
+    }
+  }
+}

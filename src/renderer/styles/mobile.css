@@ -13,6 +13,8 @@ html.lumina-native { background:#0f0f13; }
 .mobile-bottom-nav,.mobile-sheet-backdrop,.mobile-reader,.mobile-tool-overlay,.mobile-loading,.mobile-onboarding { display:none; }
 
 @media (max-width:820px) {
+  .lumina-native:not(.mobile-authenticated) .mobile-bottom-nav { display:none!important; }
+  .lumina-native #auth-screen { position:relative;z-index:80;pointer-events:auto; }
   .lumina-native .sidebar { display:none!important; }
   .lumina-native .app-layout,.lumina-native .main-content,.lumina-native .content-area { width:100%!important;max-width:none!important;margin:0!important; }
   .lumina-native .main-content { padding-bottom:calc(88px + env(safe-area-inset-bottom));min-width:0; }

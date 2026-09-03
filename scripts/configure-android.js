@@ -53,9 +53,20 @@ fs.writeFileSync(path.join(drawableDir, 'ic_stat_lumina.xml'), `<?xml version="1
     android:height="24dp"
     android:viewportWidth="256"
     android:viewportHeight="256">
-    <path android:fillColor="#FFFFFFFF" android:pathData="M72,128 Q128,52 184,128 Q128,204 72,128Z" />
-    <path android:fillColor="#FF6C63FF" android:pathData="M128,104 A24,24 0,1 0,128,152 A24,24 0,1 0,128,104" />
+    <path android:fillColor="#FFFFFFFF" android:pathData="M72,148 L128,52 L184,148 L160,138 L128,188 L96,138 Z" />
+    <path android:fillColor="#FF6C63FF" android:pathData="M128,92 A18,18 0,1 0,128,128 A18,18 0,1 0,128,92" />
 </vector>`);
+
+// Reuse the same custom mark as the Android launcher icon at every density.
+const iconSource = path.join(raiz, 'src/renderer/assets/icon.png');
+const launcherSizes = { mdpi: 48, hdpi: 72, xhdpi: 96, xxhdpi: 144, xxxhdpi: 192 };
+for (const [density, size] of Object.entries(launcherSizes)) {
+  const dir = path.join(resPath, `mipmap-${density}`);
+  fs.mkdirSync(dir, { recursive: true });
+  const source = path.join(raiz, `src/renderer/assets/icon-${size}.png`);
+  fs.copyFileSync(source, path.join(dir, 'ic_launcher.png'));
+  fs.copyFileSync(source, path.join(dir, 'ic_launcher_round.png'));
+}
 
 const colorsPath = path.join(valuesDir, 'colors.xml');
 let colors = fs.existsSync(colorsPath) ? fs.readFileSync(colorsPath, 'utf8') : '<resources>\n</resources>\n';

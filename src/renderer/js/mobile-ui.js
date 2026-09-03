@@ -109,6 +109,13 @@
   function renderReaderAttachments(atts){ if(!atts.length)return'';return `<section class="reader-attachments"><h2>Anexos</h2>${atts.map(a=>`<div class="reader-attachment">${icon('note')}<div><strong>${esc(a.originalName||a.name||'Arquivo')}</strong><span>${esc((a.type||'arquivo').toUpperCase())}</span></div></div>`).join('')}</section>`; }
 
   function patchAuth() {
+    const syncAuthChrome = () => document.body.classList.toggle('mobile-authenticated', Boolean(App.state.user));
+    syncAuthChrome();
+    const originalAfterLogin = App.auth.afterLogin.bind(App.auth);
+    App.auth.afterLogin = async function(user) {
+      await originalAfterLogin(user);
+      syncAuthChrome();
+    };
     App.auth.login = async function() {
       const username=$('#login-username')?.value.trim(), password=$('#login-password')?.value, remember=Boolean($('#login-remember')?.checked), err=$('#login-error');
       if(err)err.textContent=''; if(!username||!password){if(err)err.textContent='Preencha todos os campos';return;}
@@ -116,7 +123,7 @@
       if(result.success) await App.auth.afterLogin(result.user); else if(err)err.textContent=result.error||'Erro ao entrar';
     };
     const originalLogout=App.auth.logout.bind(App.auth);
-    App.auth.logout=function(){ App.showConfirm('Sair','Deseja sair da conta?',async()=>{await lumina.auth.clearSession();App.state.user=null;App.state.notes=[];App.state.reminders=[];$('#main-screen')?.classList.remove('active');$('#auth-screen')?.classList.add('active');if($('#login-password'))$('#login-password').value='';App.auth.init();}); };
+    App.auth.logout=function(){ App.showConfirm('Sair','Deseja sair da conta?',async()=>{await lumina.auth.clearSession();App.state.user=null;App.state.notes=[];App.state.reminders=[];syncAuthChrome();$('#main-screen')?.classList.remove('active');$('#auth-screen')?.classList.add('active');if($('#login-password'))$('#login-password').value='';App.auth.init();}); };
     void originalLogout;
   }
 

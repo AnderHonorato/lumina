@@ -46,13 +46,25 @@
   const css = document.createElement('link');
   css.rel = 'stylesheet'; css.href = 'styles/mobile.css'; document.head.appendChild(css);
 
-  const platform = document.createElement('script');
-  platform.src = 'js/mobile-platform.js';
-  platform.onerror = () => rejectReady(new Error('Não foi possível carregar o adaptador Android'));
-  document.head.appendChild(platform);
+  let uiLoaded = false;
+  const loadMobileUI = () => {
+    if (uiLoaded) return;
+    uiLoaded = true;
+    const ui = document.createElement('script');
+    ui.src = 'js/mobile-ui.js';
+    ui.onerror = () => window.__luminaBootFail?.(new Error('Não foi possível carregar a interface móvel'), 'Interface móvel');
+    document.head.appendChild(ui);
+  };
+  window.addEventListener('lumina:mobile-ready', loadMobileUI, { once: true });
 
-  const ui = document.createElement('script');
-  ui.src = 'js/mobile-ui.js'; ui.defer = true; document.head.appendChild(ui);
+  const platform = document.createElement('script');
+  platform.src = 'js/mobile-platform-v2.js';
+  platform.onerror = () => {
+    const error = new Error('Não foi possível carregar o adaptador Android v2');
+    window.__luminaBootFail?.(error, 'Adaptador Android');
+    rejectReady(error);
+  };
+  document.head.appendChild(platform);
 })();
 
 (function attachUsersModule() {
@@ -138,8 +150,8 @@
       };
       reader.readAsDataURL(file); event.target.value = '';
     },
-    blockChat() { App.showConfirm('Bloquear', 'Bloquear este usuário?', async () => { await lumina.users.blockUser(App.state.user.id, this.otherUserId); App.ui.closeModal('user-chat-modal'); App.showToast('Usuário bloqueado', 'info'); }); },
-    async archiveChat() { await lumina.users.archiveChat(App.state.user.id, this.otherUserId); App.ui.closeModal('user-chat-modal'); App.showToast('Chat arquivado', 'info'); },
+    blockChat() { App.showConfirm('Bloquear', 'Bloquear este usuário?', async () => { await lumina.users.blockUser({ userId: App.state.user.id, blockUserId: this.otherUserId }); App.ui.closeModal('user-chat-modal'); App.showToast('Usuário bloqueado', 'info'); }); },
+    async archiveChat() { await lumina.users.archiveChat({ userId: App.state.user.id, otherUserId: this.otherUserId }); App.ui.closeModal('user-chat-modal'); App.showToast('Chat arquivado', 'info'); },
     async shareNote() {
       const note = App.state.notes?.[0]; if (!note) { App.showToast('Nenhuma nota para compartilhar', 'error'); return; }
       if (window.Capacitor?.isNativePlatform?.() && lumina.native?.shareNote) await lumina.native.shareNote(note);

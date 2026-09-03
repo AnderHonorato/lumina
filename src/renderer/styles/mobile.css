@@ -14,7 +14,9 @@ html.lumina-native { background:#0f0f13; }
 
 @media (max-width:820px) {
   .lumina-native:not(.mobile-authenticated) .mobile-bottom-nav { display:none!important; }
-  .lumina-native #auth-screen { position:relative;z-index:80;pointer-events:auto; }
+  .lumina-native #auth-screen { position:relative;z-index:80;pointer-events:auto;-webkit-app-region:no-drag; }
+  .lumina-native #auth-screen .auth-container,.lumina-native #auth-screen .auth-card,.lumina-native #auth-screen .auth-form,.lumina-native #auth-screen input,.lumina-native #auth-screen label,.lumina-native #auth-screen button { position:relative;z-index:81;pointer-events:auto;-webkit-app-region:no-drag; }
+  .lumina-native #auth-screen input,.lumina-native #auth-screen button { touch-action:manipulation; }
   .lumina-native .sidebar { display:none!important; }
   .lumina-native .app-layout,.lumina-native .main-content,.lumina-native .content-area { width:100%!important;max-width:none!important;margin:0!important; }
   .lumina-native .main-content { padding-bottom:calc(88px + env(safe-area-inset-bottom));min-width:0; }

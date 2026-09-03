@@ -27,6 +27,7 @@ jobs:
           set -euo pipefail
           find src scripts -name '*.js' -print0 | xargs -0 -n1 node --check
           bash -n scripts/android-smoke.sh
+          node --check scripts/configure-ios.js
           node -e "JSON.parse(require('fs').readFileSync('package.json')); JSON.parse(require('fs').readFileSync('capacitor.config.json'));"
       - name: Validar bootstrap Android corrigido
         shell: bash
@@ -36,6 +37,7 @@ jobs:
           grep -F "runRaw('INSERT OR IGNORE INTO schema_migrations" src/renderer/js/mobile-platform-v2.js
           grep -F "window.dispatchEvent(new CustomEvent('lumina:mobile-ready'))" src/renderer/js/mobile-platform-v2.js
           grep -F "mobile-platform-v2.js" src/renderer/js/users.js
+          grep -F "mobile-authenticated" src/renderer/js/mobile-ui.js src/renderer/styles/mobile.css
 
   android-apk:
     name: Android APK + boot real
@@ -133,3 +135,32 @@ jobs:
           $installer = Get-ChildItem -Path dist -Filter '*.exe' | Select-Object -First 1
           if (-not $installer) { throw 'Instalador Windows não foi gerado' }
           Write-Host "Instalador: $($installer.FullName) ($([math]::Round($installer.Length/1MB,2)) MB)"
+
+  ios-simulator:
+    name: iOS build (simulador)
+    runs-on: macos-latest
+    needs: static-qa
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - name: Instalar dependências
+        run: npm install --ignore-scripts --no-audit --no-fund
+      - name: Gerar projeto iOS Capacitor
+        run: |
+          npx cap add ios
+          npx cap sync ios
+          node scripts/configure-ios.js
+      - name: Compilar app iOS para simulador
+        run: |
+          xcodebuild -workspace ios/App/App.xcworkspace -scheme App -sdk iphonesimulator -configuration Debug -derivedDataPath ios/build CODE_SIGNING_ALLOWED=NO build
+      - name: Publicar app iOS para simulador
+        uses: actions/upload-artifact@v4
+        with:
+          name: Lumina-Notes-iOS-simulator
+          path: ios/build/Build/Products/Debug-iphonesimulator/App.app
+          if-no-files-found: error
+          retention-days: 30

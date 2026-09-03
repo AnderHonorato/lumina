@@ -15,7 +15,16 @@
     "android:open": "npx cap open android",
     "android:doctor": "npx cap doctor"
   },
-  "keywords": ["notes", "diary", "reminders", "calendar", "electron", "capacitor", "android", "offline-first"],
+  "keywords": [
+    "notes",
+    "diary",
+    "reminders",
+    "calendar",
+    "electron",
+    "capacitor",
+    "android",
+    "offline-first"
+  ],
   "author": "Lumina",
   "license": "MIT",
   "devDependencies": {
@@ -24,6 +33,7 @@
     "electron-builder": "^24.9.1"
   },
   "dependencies": {
+    "@capacitor-community/sqlite": "^8.1.1",
     "@capacitor/android": "^8.5.0",
     "@capacitor/app": "^8.0.0",
     "@capacitor/camera": "^8.0.0",
@@ -31,16 +41,16 @@
     "@capacitor/filesystem": "^8.0.0",
     "@capacitor/geolocation": "^8.0.0",
     "@capacitor/haptics": "^8.0.0",
+    "@capacitor/ios": "^8.5.1",
     "@capacitor/keyboard": "^8.0.0",
     "@capacitor/local-notifications": "^8.0.0",
     "@capacitor/preferences": "^8.0.0",
     "@capacitor/share": "^8.0.0",
     "@capacitor/splash-screen": "^8.0.0",
-    "@capacitor-community/sqlite": "^8.1.1",
-    "capacitor-secure-storage-plugin": "^0.13.0",
     "archiver": "^6.0.1",
     "bcryptjs": "^2.4.3",
     "better-sqlite3": "11.10.0",
+    "capacitor-secure-storage-plugin": "^0.13.0",
     "extract-zip": "^2.0.1",
     "node-cron": "^3.0.3",
     "node-notifier": "^10.0.1",
@@ -51,7 +61,14 @@
     "productName": "Lumina Notes",
     "copyright": "Copyright © 2026 Lumina",
     "win": {
-      "target": [{"target": "nsis", "arch": ["x64"]}],
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
       "icon": "src/renderer/assets/icon.ico",
       "requestedExecutionLevel": "asInvoker"
     },
@@ -66,11 +83,24 @@
       "createStartMenuShortcut": true,
       "shortcutName": "Lumina Notes",
       "runAfterFinish": true,
-      "installerLanguages": ["pt_BR"],
+      "installerLanguages": [
+        "pt_BR"
+      ],
       "language": "1046"
     },
-    "files": ["src/**/*", "node_modules/**/*", "!node_modules/.cache"],
-    "directories": {"output": "dist"},
-    "extraResources": [{"from": "src/renderer/assets", "to": "assets"}]
+    "files": [
+      "src/**/*",
+      "node_modules/**/*",
+      "!node_modules/.cache"
+    ],
+    "directories": {
+      "output": "dist"
+    },
+    "extraResources": [
+      {
+        "from": "src/renderer/assets",
+        "to": "assets"
+      }
+    ]
   }
 }

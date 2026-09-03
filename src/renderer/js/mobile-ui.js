@@ -109,7 +109,7 @@
   function renderReaderAttachments(atts){ if(!atts.length)return'';return `<section class="reader-attachments"><h2>Anexos</h2>${atts.map(a=>`<div class="reader-attachment">${icon('note')}<div><strong>${esc(a.originalName||a.name||'Arquivo')}</strong><span>${esc((a.type||'arquivo').toUpperCase())}</span></div></div>`).join('')}</section>`; }
 
   function patchAuth() {
-    const syncAuthChrome = () => document.body.classList.toggle('mobile-authenticated', Boolean(App.state.user));
+    const syncAuthChrome = () => document.body.classList.toggle('mobile-authenticated', Boolean(App.state.user && $('#main-screen')?.classList.contains('active') && !$('#auth-screen')?.classList.contains('active')));
     syncAuthChrome();
     const originalAfterLogin = App.auth.afterLogin.bind(App.auth);
     App.auth.afterLogin = async function(user) {

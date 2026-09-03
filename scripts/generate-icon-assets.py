@@ -31,7 +31,8 @@ def draw_icon(size: int) -> Image.Image:
 icon = draw_icon(1024)
 icon.resize((256, 256), Image.Resampling.LANCZOS).save(ASSETS / "icon.png", optimize=True)
 icon.resize((512, 512), Image.Resampling.LANCZOS).save(ASSETS / "icon-512.png", optimize=True)
+icon.resize((1024, 1024), Image.Resampling.LANCZOS).save(ASSETS / "icon-1024.png", optimize=True)
 icon.save(ASSETS / "icon.ico", format="ICO", sizes=[(16,16), (32,32), (48,48), (64,64), (128,128), (256,256)])
 print(f"Generated custom Lumina icon assets in {ASSETS}")
-for size in (48, 72, 96, 144, 192, 512):
+for size in (48, 72, 96, 144, 192, 512, 1024):
     icon.resize((size, size), Image.Resampling.LANCZOS).save(ASSETS / f"icon-{size}.png", optimize=True)

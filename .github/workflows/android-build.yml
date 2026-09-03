@@ -1,0 +1,98 @@
+name: Lumina Android + Desktop QA
+
+on:
+  push:
+    branches:
+      - feat/lumina-mobile-android-v2
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  static-qa:
+    name: JavaScript e configuração
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Validar JavaScript
+        shell: bash
+        run: |
+          set -euo pipefail
+          find src scripts -name '*.js' -print0 | xargs -0 -n1 node --check
+          node -e "JSON.parse(require('fs').readFileSync('package.json')); JSON.parse(require('fs').readFileSync('capacitor.config.json'));"
+
+  android-apk:
+    name: Android APK instalável
+    runs-on: ubuntu-latest
+    needs: static-qa
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+      - name: Instalar dependências web/nativas
+        run: npm install --ignore-scripts --no-audit --no-fund
+      - name: Gerar projeto Android Capacitor
+        run: |
+          npx cap add android
+          npx cap sync android
+          node scripts/configure-android.js
+      - name: Compilar APK debug assinado pelo Android SDK
+        working-directory: android
+        run: |
+          chmod +x gradlew
+          ./gradlew --no-daemon clean assembleDebug
+      - name: Validar APK
+        shell: bash
+        run: |
+          set -euo pipefail
+          APK='android/app/build/outputs/apk/debug/app-debug.apk'
+          test -s "$APK"
+          unzip -t "$APK" >/dev/null
+          cp "$APK" Lumina-Notes.apk
+          sha256sum Lumina-Notes.apk | tee Lumina-Notes.apk.sha256
+          ls -lh Lumina-Notes.apk
+      - name: Publicar APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: Lumina-Notes-apk
+          path: |
+            Lumina-Notes.apk
+            Lumina-Notes.apk.sha256
+          if-no-files-found: error
+          retention-days: 30
+
+  desktop-regression:
+    name: Windows build regression
+    runs-on: windows-latest
+    needs: static-qa
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - name: Instalar dependências
+        run: npm install --no-audit --no-fund
+      - name: Build Windows
+        run: npm run build:win
+      - name: Verificar instalador
+        shell: pwsh
+        run: |
+          $installer = Get-ChildItem -Path dist -Filter '*.exe' | Select-Object -First 1
+          if (-not $installer) { throw 'Instalador Windows não foi gerado' }
+          Write-Host "Instalador: $($installer.FullName) ($([math]::Round($installer.Length/1MB,2)) MB)"

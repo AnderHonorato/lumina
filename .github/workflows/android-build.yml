@@ -73,6 +73,15 @@ jobs:
           cp "$APK" Lumina-Notes.apk
           sha256sum Lumina-Notes.apk | tee Lumina-Notes.apk.sha256
           ls -lh Lumina-Notes.apk
+      - name: Publicar APK imediatamente após compilar
+        uses: actions/upload-artifact@v4
+        with:
+          name: Lumina-Notes-apk
+          path: |
+            Lumina-Notes.apk
+            Lumina-Notes.apk.sha256
+          if-no-files-found: error
+          retention-days: 30
       - name: Instalar, abrir e confirmar bootstrap no Android
         uses: reactivecircus/android-emulator-runner@v2
         with:
@@ -116,15 +125,6 @@ jobs:
           path: lumina-android-logcat.txt
           if-no-files-found: ignore
           retention-days: 14
-      - name: Publicar APK
-        uses: actions/upload-artifact@v4
-        with:
-          name: Lumina-Notes-apk
-          path: |
-            Lumina-Notes.apk
-            Lumina-Notes.apk.sha256
-          if-no-files-found: error
-          retention-days: 30
 
   desktop-regression:
     name: Windows build regression

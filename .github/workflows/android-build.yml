@@ -82,6 +82,16 @@ jobs:
             Lumina-Notes.apk.sha256
           if-no-files-found: error
           retention-days: 30
+      - name: Habilitar aceleração KVM no runner
+        shell: bash
+        run: |
+          set -e
+          if [ -e /dev/kvm ]; then
+            sudo chmod 666 /dev/kvm
+            ls -l /dev/kvm
+          else
+            echo "::warning::/dev/kvm não existe neste runner; o emulador usará software."
+          fi
       - name: Instalar, abrir e confirmar bootstrap no Android
         uses: reactivecircus/android-emulator-runner@v2
         with:
@@ -90,6 +100,7 @@ jobs:
           arch: x86_64
           profile: pixel_6
           disable-animations: true
+          disable-linux-hw-accel: false
           script: |
             set -eu
             adb logcat -c

@@ -126,7 +126,7 @@ jobs:
       - name: Instalar dependências
         run: npm install --no-audit --no-fund
       - name: Build Windows
-        run: npm run build:win
+        run: npm run build:win -- --publish never
       - name: Verificar instalador
         shell: pwsh
         run: |

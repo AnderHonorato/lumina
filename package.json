@@ -2,7 +2,7 @@
   "name": "lumina-notes",
   "version": "2.0.0-beta.1",
   "description": "Lumina Notes - anotações, diário, lembretes, calendário e organização pessoal offline-first",
-  "main": "src/main/main.js",
+  "main": "src/main/bootstrap.js",
   "scripts": {
     "start": "electron .",
     "dev": "electron . --dev",

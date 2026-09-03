@@ -6,7 +6,7 @@
   "android": {
     "allowMixedContent": false,
     "backgroundColor": "#0f0f13",
-    "captureInput": true,
+    "captureInput": false,
     "webContentsDebuggingEnabled": false
   },
   "plugins": {

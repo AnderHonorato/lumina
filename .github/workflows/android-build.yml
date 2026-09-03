@@ -38,6 +38,9 @@ jobs:
           grep -F "window.dispatchEvent(new CustomEvent('lumina:mobile-ready'))" src/renderer/js/mobile-platform-v2.js
           grep -F "mobile-platform-v2.js" src/renderer/js/users.js
           grep -F "mobile-authenticated" src/renderer/js/mobile-ui.js src/renderer/styles/mobile.css
+          grep -F ".screen.active" src/renderer/styles/main.css
+          grep -F "pointer-events: auto" src/renderer/styles/main.css
+          test "$(grep -Roh 'pointer-events: all' src/renderer/styles | wc -l)" -eq 0
 
   android-apk:
     name: Android APK + boot real

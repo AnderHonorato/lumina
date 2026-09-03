@@ -170,7 +170,7 @@ html, body {
 
 .screen.active {
   opacity: 1;
-  pointer-events: all;
+  pointer-events: auto;
 }
 
 /* ================================
@@ -1956,7 +1956,7 @@ html, body {
 
 .modal-overlay.open {
   opacity: 1;
-  pointer-events: all;
+  pointer-events: auto;
 }
 
 .modal-container {
@@ -2268,7 +2268,7 @@ html, body {
   box-shadow: var(--shadow-lg);
   min-width: 240px;
   max-width: 380px;
-  pointer-events: all;
+  pointer-events: auto;
   animation: toastIn 0.35s cubic-bezier(0.34, 1.56, 0.64, 1) both;
 }
 
@@ -2769,7 +2769,7 @@ body.theme-light input[type="time"] {
   z-index: 300; display: flex; flex-direction: column;
   opacity: 0; pointer-events: none; transition: opacity 0.2s;
 }
-.media-viewer-overlay.open { opacity: 1; pointer-events: all; }
+.media-viewer-overlay.open { opacity: 1; pointer-events: auto; }
 
 .media-viewer-toolbar {
   display: flex; align-items: center; justify-content: space-between;

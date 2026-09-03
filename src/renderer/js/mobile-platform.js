@@ -1,0 +1,409 @@
+/* Lumina Notes - Android platform adapter (Capacitor 8)
+ * Mantém o contrato window.lumina usado pelo renderer Electron.
+ */
+(() => {
+  'use strict';
+
+  const Capacitor = window.Capacitor;
+  if (!Capacitor?.isNativePlatform?.()) return;
+
+  const P = Capacitor.Plugins || {};
+  const SQLite = P.CapacitorSQLite;
+  const Preferences = P.Preferences;
+  const LocalNotifications = P.LocalNotifications;
+  const Filesystem = P.Filesystem;
+  const Share = P.Share;
+  const Geolocation = P.Geolocation;
+  const Haptics = P.Haptics;
+  const Secure = P.SecureStoragePlugin || P.SecureStorage;
+  const DB = 'lumina_notes';
+  const SESSION_KEY = 'lumina_session_v2';
+  const API_KEY = 'lumina_ai_api_key';
+  let dbReady = null;
+  const eventos = new Map();
+
+  const uuid = () => crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random().toString(16).slice(2)}-${Math.random().toString(16).slice(2)}`;
+  const agora = () => new Date().toISOString();
+  const json = (v, fallback = []) => { try { return JSON.parse(v ?? ''); } catch { return fallback; } };
+  const bool = v => Boolean(Number(v));
+  const hashInt = value => {
+    let h = 2166136261;
+    for (const c of String(value)) { h ^= c.charCodeAt(0); h = Math.imul(h, 16777619); }
+    return Math.abs(h | 0) || 1;
+  };
+  const emitir = (canal, ...args) => (eventos.get(canal) || new Set()).forEach(cb => { try { cb(...args); } catch (e) { console.error(e); } });
+
+  function b64(bytes) {
+    let s = '';
+    new Uint8Array(bytes).forEach(b => s += String.fromCharCode(b));
+    return btoa(s);
+  }
+  function fromB64(s) {
+    const raw = atob(s); const out = new Uint8Array(raw.length);
+    for (let i = 0; i < raw.length; i++) out[i] = raw.charCodeAt(i);
+    return out;
+  }
+  async function hashSenha(senha, saltB64 = null, iteracoes = 210000) {
+    const salt = saltB64 ? fromB64(saltB64) : crypto.getRandomValues(new Uint8Array(16));
+    const chave = await crypto.subtle.importKey('raw', new TextEncoder().encode(senha), 'PBKDF2', false, ['deriveBits']);
+    const bits = await crypto.subtle.deriveBits({ name: 'PBKDF2', hash: 'SHA-256', salt, iterations: iteracoes }, chave, 256);
+    return `pbkdf2$${iteracoes}$${b64(salt)}$${b64(bits)}`;
+  }
+  async function verificarSenha(senha, salvo) {
+    if (!salvo?.startsWith('pbkdf2$')) return false;
+    const [, n, salt, esperado] = salvo.split('$');
+    const obtido = await hashSenha(senha, salt, Number(n));
+    const a = fromB64(obtido.split('$')[3]); const b = fromB64(esperado);
+    if (a.length !== b.length) return false;
+    let diff = 0; for (let i = 0; i < a.length; i++) diff |= a[i] ^ b[i];
+    return diff === 0;
+  }
+
+  async function abrirBanco() {
+    if (dbReady) return dbReady;
+    dbReady = (async () => {
+      if (!SQLite) throw new Error('Plugin SQLite Android indisponível');
+      try { await SQLite.checkConnectionsConsistency({ dbNames: [DB], openModes: ['RW'] }); } catch {}
+      try {
+        await SQLite.createConnection({ database: DB, version: 2, encrypted: false, mode: 'no-encryption', readonly: false });
+      } catch (e) {
+        if (!String(e?.message || e).toLowerCase().includes('already')) throw e;
+      }
+      await SQLite.open({ database: DB, readonly: false });
+      await executar(`
+        PRAGMA foreign_keys=ON;
+        CREATE TABLE IF NOT EXISTS schema_migrations (version INTEGER PRIMARY KEY, applied_at TEXT NOT NULL);
+        CREATE TABLE IF NOT EXISTS users (
+          id TEXT PRIMARY KEY, username TEXT UNIQUE NOT NULL, email TEXT UNIQUE, password_hash TEXT NOT NULL,
+          display_name TEXT, avatar_color TEXT DEFAULT '#6C63FF', avatar_photo TEXT DEFAULT '', bio TEXT DEFAULT '',
+          birthday TEXT DEFAULT '', city TEXT DEFAULT '', state TEXT DEFAULT '', country TEXT DEFAULT '', zip_code TEXT DEFAULT '',
+          address TEXT DEFAULT '', latitude REAL, longitude REAL, created_at TEXT NOT NULL, last_login TEXT
+        );
+        CREATE TABLE IF NOT EXISTS notes (
+          id TEXT PRIMARY KEY, user_id TEXT NOT NULL, title TEXT NOT NULL DEFAULT 'Sem título', content TEXT DEFAULT '',
+          type TEXT DEFAULT 'note', mood TEXT, tags TEXT DEFAULT '[]', attachments TEXT DEFAULT '[]',
+          is_pinned INTEGER DEFAULT 0, is_favorite INTEGER DEFAULT 0, color TEXT DEFAULT 'default',
+          location_data TEXT DEFAULT '{}', created_at TEXT NOT NULL, updated_at TEXT NOT NULL, deleted_at TEXT,
+          FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
+        );
+        CREATE TABLE IF NOT EXISTS note_versions (
+          id TEXT PRIMARY KEY, note_id TEXT NOT NULL, user_id TEXT NOT NULL, title TEXT NOT NULL, content TEXT DEFAULT '',
+          type TEXT DEFAULT 'note', mood TEXT, tags TEXT DEFAULT '[]', attachments TEXT DEFAULT '[]', color TEXT DEFAULT 'default',
+          created_at TEXT NOT NULL, FOREIGN KEY(note_id) REFERENCES notes(id) ON DELETE CASCADE
+        );
+        CREATE TABLE IF NOT EXISTS reminders (
+          id TEXT PRIMARY KEY, user_id TEXT NOT NULL, note_id TEXT, title TEXT NOT NULL, description TEXT DEFAULT '',
+          remind_at TEXT NOT NULL, repeat_type TEXT DEFAULT 'none', repeat_interval INTEGER DEFAULT 0,
+          is_completed INTEGER DEFAULT 0, is_dismissed INTEGER DEFAULT 0, priority TEXT DEFAULT 'normal',
+          color TEXT DEFAULT '#6C63FF', created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
+          FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
+        );
+        CREATE TABLE IF NOT EXISTS calendar_events (
+          id TEXT PRIMARY KEY, user_id TEXT NOT NULL, note_id TEXT, reminder_id TEXT, title TEXT NOT NULL,
+          description TEXT DEFAULT '', event_date TEXT NOT NULL, start_time TEXT, end_time TEXT,
+          color TEXT DEFAULT '#6C63FF', all_day INTEGER DEFAULT 1, repeat_type TEXT DEFAULT 'none',
+          location_data TEXT DEFAULT '{}', attachments TEXT DEFAULT '[]', created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
+          FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
+        );
+        CREATE TABLE IF NOT EXISTS settings (
+          user_id TEXT PRIMARY KEY, theme TEXT DEFAULT 'dark', accent_color TEXT DEFAULT '#6C63FF',
+          font_size TEXT DEFAULT 'medium', language TEXT DEFAULT 'pt-BR', notifications_enabled INTEGER DEFAULT 1,
+          sound_enabled INTEGER DEFAULT 1, timeline_direction TEXT DEFAULT 'asc', sidebar_collapsed INTEGER DEFAULT 0,
+          data TEXT DEFAULT '{}', FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
+        );
+        CREATE TABLE IF NOT EXISTS demands (
+          id TEXT PRIMARY KEY, user_id TEXT NOT NULL, title TEXT NOT NULL, description TEXT DEFAULT '', status TEXT DEFAULT 'pending',
+          priority TEXT DEFAULT 'normal', color TEXT DEFAULT 'default', tags TEXT DEFAULT '[]', created_at TEXT NOT NULL, updated_at TEXT NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS demand_steps (
+          id TEXT PRIMARY KEY, demand_id TEXT NOT NULL, step_order INTEGER DEFAULT 0, title TEXT DEFAULT '', content TEXT DEFAULT '',
+          image_data TEXT DEFAULT '', created_at TEXT NOT NULL, FOREIGN KEY(demand_id) REFERENCES demands(id) ON DELETE CASCADE
+        );
+        CREATE TABLE IF NOT EXISTS chat_conversations (
+          id TEXT PRIMARY KEY, user_id TEXT NOT NULL, title TEXT DEFAULT 'Nova conversa', is_pinned INTEGER DEFAULT 0,
+          is_archived INTEGER DEFAULT 0, created_at TEXT NOT NULL, updated_at TEXT NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS chat_messages (
+          id TEXT PRIMARY KEY, conversation_id TEXT NOT NULL, role TEXT NOT NULL, content TEXT DEFAULT '', created_at TEXT NOT NULL,
+          FOREIGN KEY(conversation_id) REFERENCES chat_conversations(id) ON DELETE CASCADE
+        );
+        CREATE TABLE IF NOT EXISTS user_messages (
+          id TEXT PRIMARY KEY, from_user_id TEXT NOT NULL, to_user_id TEXT NOT NULL, content TEXT DEFAULT '', file_name TEXT DEFAULT '',
+          file_data TEXT DEFAULT '', file_type TEXT DEFAULT '', is_read INTEGER DEFAULT 0, is_archived INTEGER DEFAULT 0,
+          is_blocked INTEGER DEFAULT 0, created_at TEXT NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS shared_items (
+          id TEXT PRIMARY KEY, from_user_id TEXT NOT NULL, to_user_id TEXT NOT NULL, item_type TEXT NOT NULL,
+          item_data TEXT NOT NULL, created_at TEXT NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS alarms (
+          id TEXT PRIMARY KEY, user_id TEXT NOT NULL, title TEXT NOT NULL, alarm_time TEXT NOT NULL,
+          repeat_days TEXT DEFAULT '[]', sound TEXT DEFAULT 'default', vibrate INTEGER DEFAULT 1, enabled INTEGER DEFAULT 1,
+          snooze_minutes INTEGER DEFAULT 10, created_at TEXT NOT NULL, updated_at TEXT NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_notes_user_updated ON notes(user_id, deleted_at, updated_at DESC);
+        CREATE INDEX IF NOT EXISTS idx_notes_type ON notes(user_id, type, deleted_at);
+        CREATE INDEX IF NOT EXISTS idx_reminders_time ON reminders(user_id, is_completed, remind_at);
+        CREATE INDEX IF NOT EXISTS idx_events_date ON calendar_events(user_id, event_date);
+        CREATE INDEX IF NOT EXISTS idx_versions_note ON note_versions(note_id, created_at DESC);
+      `);
+      await run('INSERT OR IGNORE INTO schema_migrations(version, applied_at) VALUES(2, ?)', [agora()]);
+      await configurarNotificacoes();
+      return true;
+    })();
+    return dbReady;
+  }
+
+  async function executar(statements) { return SQLite.execute({ database: DB, statements, transaction: true, readonly: false }); }
+  async function run(statement, values = []) { await abrirBancoSeNecessario(); return SQLite.run({ database: DB, statement, values, transaction: true, readonly: false, returnMode: 'no' }); }
+  async function query(statement, values = []) { await abrirBancoSeNecessario(); const r = await SQLite.query({ database: DB, statement, values, readonly: false }); return r.values || []; }
+  async function abrirBancoSeNecessario() { if (!dbReady) await abrirBanco(); else await dbReady; }
+
+  function notaNormalizada(n) {
+    if (!n) return n;
+    return { ...n, tags: json(n.tags, []), attachments: json(n.attachments, []), location: json(n.location_data, {}), is_pinned: bool(n.is_pinned), is_favorite: bool(n.is_favorite) };
+  }
+  async function usuarioPublico(id) {
+    const [u] = await query(`SELECT id,username,email,display_name,avatar_color,avatar_photo,bio,birthday,city,state,country,zip_code,address,latitude,longitude,created_at,last_login FROM users WHERE id=?`, [id]);
+    return u || null;
+  }
+  async function guardarSessao(user, lembrar) {
+    if (!Preferences) return;
+    if (!lembrar) { await Preferences.remove({ key: SESSION_KEY }); return; }
+    await Preferences.set({ key: SESSION_KEY, value: JSON.stringify({ userId: user.id, expires: Date.now() + 30 * 86400000 }) });
+  }
+
+  async function permissaoNotificacao() {
+    if (!LocalNotifications) return false;
+    const atual = await LocalNotifications.checkPermissions();
+    if (atual.display === 'granted') return true;
+    const pedido = await LocalNotifications.requestPermissions();
+    return pedido.display === 'granted';
+  }
+  function notificacaoId(prefixo, id) { return (hashInt(`${prefixo}:${id}`) % 2000000000) + 1; }
+  function scheduleAt(data) {
+    const at = new Date(data.remind_at || data.alarm_time);
+    const everyMap = { daily: 'day', weekly: 'week', monthly: 'month', yearly: 'year' };
+    const every = everyMap[data.repeat_type];
+    return every ? { at, every, allowWhileIdle: true } : { at, allowWhileIdle: true };
+  }
+  async function agendarLembrete(r) {
+    if (!LocalNotifications || !r || r.is_completed || new Date(r.remind_at) <= new Date()) return;
+    if (!(await permissaoNotificacao())) return;
+    const id = notificacaoId('reminder', r.id);
+    await LocalNotifications.cancel({ notifications: [{ id }] }).catch(() => {});
+    await LocalNotifications.schedule({ notifications: [{ id, title: r.title, body: r.description || 'Lembrete do Lumina', schedule: scheduleAt(r), actionTypeId: 'LUMINA_REMINDER', extra: { kind: 'reminder', id: r.id, noteId: r.note_id || null } }] });
+  }
+  async function agendarAlarme(a) {
+    if (!LocalNotifications || !a || !a.enabled) return;
+    if (!(await permissaoNotificacao())) return;
+    const id = notificacaoId('alarm', a.id);
+    await LocalNotifications.cancel({ notifications: [{ id }] }).catch(() => {});
+    await LocalNotifications.schedule({ notifications: [{ id, title: a.title, body: 'Alarme do Lumina', schedule: { at: new Date(a.alarm_time), allowWhileIdle: true }, actionTypeId: 'LUMINA_ALARM', sound: a.sound === 'default' ? undefined : a.sound, extra: { kind: 'alarm', id: a.id } }] });
+  }
+  async function configurarNotificacoes() {
+    if (!LocalNotifications) return;
+    try {
+      await LocalNotifications.registerActionTypes({ types: [
+        { id: 'LUMINA_REMINDER', actions: [{ id: 'OPEN', title: 'Abrir' }, { id: 'DONE', title: 'Concluir' }, { id: 'SNOOZE', title: 'Adiar 10 min' }] },
+        { id: 'LUMINA_ALARM', actions: [{ id: 'OPEN', title: 'Abrir' }, { id: 'SNOOZE', title: 'Soneca' }] }
+      ] });
+      await LocalNotifications.addListener('localNotificationActionPerformed', async ev => {
+        const extra = ev.notification?.extra || {};
+        if (extra.kind === 'reminder') {
+          if (ev.actionId === 'DONE') await api.reminders.complete(extra.id);
+          else if (ev.actionId === 'SNOOZE') {
+            const [r] = await query('SELECT * FROM reminders WHERE id=?', [extra.id]);
+            if (r) { r.remind_at = new Date(Date.now() + 10 * 60000).toISOString(); await run('UPDATE reminders SET remind_at=?,updated_at=? WHERE id=?', [r.remind_at, agora(), r.id]); await agendarLembrete(r); }
+          } else if (extra.noteId) emitir('navigate:note', extra.noteId);
+        }
+        if (extra.kind === 'alarm' && ev.actionId === 'SNOOZE') {
+          const [a] = await query('SELECT * FROM alarms WHERE id=?', [extra.id]);
+          if (a) { a.alarm_time = new Date(Date.now() + Number(a.snooze_minutes || 10) * 60000).toISOString(); await run('UPDATE alarms SET alarm_time=?,updated_at=? WHERE id=?', [a.alarm_time, agora(), a.id]); await agendarAlarme(a); }
+        }
+      });
+    } catch (e) { console.warn('[Lumina Android] Notificações:', e.message || e); }
+  }
+
+  const auth = {
+    async register({ username, email, password, displayName }) {
+      await abrirBanco();
+      username = String(username || '').trim(); email = String(email || '').trim() || null;
+      if (!username || !password || password.length < 6) return { success: false, error: 'Usuário e senha com pelo menos 6 caracteres são obrigatórios' };
+      const existentes = await query('SELECT id FROM users WHERE lower(username)=lower(?) OR (? IS NOT NULL AND lower(email)=lower(?)) LIMIT 1', [username, email, email]);
+      if (existentes.length) return { success: false, error: 'Usuário ou e-mail já existe' };
+      const id = uuid(); const cores = ['#6C63FF','#FF6584','#43B89C','#F7931E','#4FC3F7','#BA68C8'];
+      await run(`INSERT INTO users(id,username,email,password_hash,display_name,avatar_color,created_at) VALUES(?,?,?,?,?,?,?)`, [id, username, email, await hashSenha(password), displayName || username, cores[Math.floor(Math.random()*cores.length)], agora()]);
+      await run('INSERT INTO settings(user_id) VALUES(?)', [id]);
+      return { success: true, user: await usuarioPublico(id) };
+    },
+    async login({ username, password, remember = false }) {
+      await abrirBanco();
+      const [u] = await query('SELECT * FROM users WHERE lower(username)=lower(?) OR lower(email)=lower(?) LIMIT 1', [String(username || '').trim(), String(username || '').trim()]);
+      if (!u) return { success: false, error: 'Usuário não encontrado' };
+      if (!(await verificarSenha(password || '', u.password_hash))) return { success: false, error: 'Senha incorreta' };
+      await run('UPDATE users SET last_login=? WHERE id=?', [agora(), u.id]);
+      const user = await usuarioPublico(u.id); await guardarSessao(user, remember);
+      return { success: true, user };
+    },
+    async getUsers() { await abrirBanco(); return query('SELECT id,username,display_name,avatar_color,avatar_photo,bio,city,state,birthday FROM users ORDER BY display_name COLLATE NOCASE'); },
+    async updateProfile(d) {
+      await abrirBanco();
+      await run(`UPDATE users SET display_name=?,email=?,avatar_color=?,bio=?,city=?,state=?,birthday=?,country=?,zip_code=?,address=?,latitude=?,longitude=? WHERE id=?`, [d.displayName || '', d.email || null, d.avatarColor || '#6C63FF', d.bio || '', d.city || '', d.state || '', d.birthday || '', d.country || '', d.zipCode || '', d.address || '', d.latitude ?? null, d.longitude ?? null, d.userId]);
+      return { success: true, user: await usuarioPublico(d.userId) };
+    },
+    async changePassword({ userId, currentPassword, newPassword }) {
+      const [u] = await query('SELECT password_hash FROM users WHERE id=?', [userId]);
+      if (!u || !(await verificarSenha(currentPassword || '', u.password_hash))) return { success: false, error: 'Senha atual incorreta' };
+      if (!newPassword || newPassword.length < 6) return { success: false, error: 'Nova senha muito curta' };
+      await run('UPDATE users SET password_hash=? WHERE id=?', [await hashSenha(newPassword), userId]); return { success: true };
+    },
+    async updateAvatar({ userId, avatarPhoto }) { await run('UPDATE users SET avatar_photo=? WHERE id=?', [avatarPhoto || '', userId]); return { success: true, avatarPhoto: avatarPhoto || '' }; },
+    async getSession() {
+      if (!Preferences) return { success: false };
+      const r = await Preferences.get({ key: SESSION_KEY }); const s = json(r.value, null);
+      if (!s?.userId || !s.expires || s.expires < Date.now()) { await Preferences.remove({ key: SESSION_KEY }); return { success: false }; }
+      const user = await usuarioPublico(s.userId); return user ? { success: true, user } : { success: false };
+    },
+    async clearSession() { if (Preferences) await Preferences.remove({ key: SESSION_KEY }); return { success: true }; }
+  };
+
+  const notes = {
+    async getAll(userId) { return (await query('SELECT * FROM notes WHERE user_id=? AND deleted_at IS NULL ORDER BY is_pinned DESC, created_at ASC', [userId])).map(notaNormalizada); },
+    async getOne(id) { return notaNormalizada((await query('SELECT * FROM notes WHERE id=?', [id]))[0]); },
+    async create(d) {
+      const id = uuid(), t = agora();
+      await run(`INSERT INTO notes(id,user_id,title,content,type,mood,tags,attachments,is_pinned,is_favorite,color,location_data,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, [id,d.userId,d.title||'Sem título',d.content||'',d.type||'note',d.mood||null,JSON.stringify(d.tags||[]),JSON.stringify(d.attachments||[]),d.isPinned?1:0,d.isFavorite?1:0,d.color||'default',JSON.stringify(d.location||{}),t,t]);
+      return notes.getOne(id);
+    },
+    async update(d) {
+      const atual = await notes.getOne(d.id); if (!atual) return null;
+      const mudou = atual.title !== d.title || atual.content !== d.content;
+      if (mudou) await run(`INSERT INTO note_versions(id,note_id,user_id,title,content,type,mood,tags,attachments,color,created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?)`, [uuid(),atual.id,atual.user_id,atual.title,atual.content,atual.type,atual.mood,JSON.stringify(atual.tags||[]),JSON.stringify(atual.attachments||[]),atual.color,agora()]);
+      await run(`UPDATE notes SET title=?,content=?,type=?,mood=?,tags=?,attachments=?,color=?,is_pinned=?,is_favorite=?,location_data=?,updated_at=? WHERE id=?`, [d.title||'Sem título',d.content||'',d.type||'note',d.mood||null,JSON.stringify(d.tags||[]),JSON.stringify(d.attachments||[]),d.color||'default',d.isPinned?1:0,d.isFavorite?1:0,JSON.stringify(d.location||atual.location||{}),agora(),d.id]);
+      return notes.getOne(d.id);
+    },
+    async delete(id) { await run('UPDATE notes SET deleted_at=?,updated_at=? WHERE id=?', [agora(),agora(),id]); return { success:true }; },
+    async deleteMultiple(userId, ids) { for (const id of ids || []) await run('UPDATE notes SET deleted_at=?,updated_at=? WHERE id=? AND user_id=?', [agora(),agora(),id,userId]); return { success:true, deletedCount:(ids||[]).length }; },
+    async getHistory(userId) { return (await query('SELECT id,user_id,id AS original_id,title,type,deleted_at FROM notes WHERE user_id=? AND deleted_at IS NOT NULL ORDER BY deleted_at DESC',[userId])); },
+    async restore(id) { await run('UPDATE notes SET deleted_at=NULL,updated_at=? WHERE id=?',[agora(),id]); return {success:true}; },
+    async purge(id) { await run('DELETE FROM notes WHERE id=?',[id]); return {success:true}; },
+    async getVersions(id) { return (await query('SELECT * FROM note_versions WHERE note_id=? ORDER BY created_at DESC',[id])).map(notaNormalizada); },
+    async restoreVersion(versionId) { const [v]=await query('SELECT * FROM note_versions WHERE id=?',[versionId]); if(!v)return {success:false,error:'Versão não encontrada'}; return {success:true,note:await notes.update({id:v.note_id,title:v.title,content:v.content,type:v.type,mood:v.mood,tags:json(v.tags,[]),attachments:json(v.attachments,[]),color:v.color})}; },
+    async search(userId, text) { const q=`%${String(text||'').replace(/[%_]/g,'')}%`; return (await query('SELECT * FROM notes WHERE user_id=? AND deleted_at IS NULL AND (title LIKE ? OR content LIKE ? OR tags LIKE ?) ORDER BY is_pinned DESC,updated_at DESC',[userId,q,q,q])).map(notaNormalizada); },
+    async getTags(userId) { const rows=await query('SELECT tags FROM notes WHERE user_id=? AND deleted_at IS NULL',[userId]); return [...new Set(rows.flatMap(r=>json(r.tags,[])))]; }
+  };
+
+  const reminders = {
+    async getAll(userId) { return query(`SELECT r.*,n.title note_title FROM reminders r LEFT JOIN notes n ON n.id=r.note_id WHERE r.user_id=? ORDER BY r.remind_at`,[userId]); },
+    async create(d) { const id=uuid(),t=agora(); await run(`INSERT INTO reminders(id,user_id,note_id,title,description,remind_at,repeat_type,repeat_interval,priority,color,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)`,[id,d.userId,d.noteId||null,d.title,d.description||'',d.remindAt,d.repeatType||'none',d.repeatInterval||0,d.priority||'normal',d.color||'#6C63FF',t,t]); const [r]=await query('SELECT * FROM reminders WHERE id=?',[id]); await agendarLembrete(r); return r; },
+    async update(d) { await run(`UPDATE reminders SET note_id=?,title=?,description=?,remind_at=?,repeat_type=?,repeat_interval=?,priority=?,color=?,is_completed=0,updated_at=? WHERE id=?`,[d.noteId||null,d.title,d.description||'',d.remindAt,d.repeatType||'none',d.repeatInterval||0,d.priority||'normal',d.color||'#6C63FF',agora(),d.id]); const [r]=await query('SELECT * FROM reminders WHERE id=?',[d.id]); await agendarLembrete(r); return r; },
+    async delete(id) { if(LocalNotifications)await LocalNotifications.cancel({notifications:[{id:notificacaoId('reminder',id)}]}).catch(()=>{}); await run('DELETE FROM reminders WHERE id=?',[id]); return {success:true}; },
+    async complete(id) { if(LocalNotifications)await LocalNotifications.cancel({notifications:[{id:notificacaoId('reminder',id)}]}).catch(()=>{}); await run('UPDATE reminders SET is_completed=1,updated_at=? WHERE id=?',[agora(),id]); return {success:true}; }
+  };
+
+  const calendar = {
+    async getEvents(userId,month,year){ const mm=String(month).padStart(2,'0'); return query(`SELECT c.*,n.title note_title,r.title reminder_title FROM calendar_events c LEFT JOIN notes n ON n.id=c.note_id LEFT JOIN reminders r ON r.id=c.reminder_id WHERE c.user_id=? AND substr(c.event_date,6,2)=? AND substr(c.event_date,1,4)=? ORDER BY c.event_date,c.start_time`,[userId,mm,String(year)]); },
+    async create(d){const id=uuid(),t=agora();await run(`INSERT INTO calendar_events(id,user_id,note_id,reminder_id,title,description,event_date,start_time,end_time,color,all_day,repeat_type,location_data,attachments,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,[id,d.userId,d.noteId||null,d.reminderId||null,d.title,d.description||'',d.eventDate,d.startTime||null,d.endTime||null,d.color||'#6C63FF',d.allDay?1:0,d.repeatType||'none',JSON.stringify(d.location||{}),JSON.stringify(d.attachments||[]),t,t]);return (await query('SELECT * FROM calendar_events WHERE id=?',[id]))[0];},
+    async update(d){await run(`UPDATE calendar_events SET note_id=?,reminder_id=?,title=?,description=?,event_date=?,start_time=?,end_time=?,color=?,all_day=?,repeat_type=?,location_data=?,attachments=?,updated_at=? WHERE id=?`,[d.noteId||null,d.reminderId||null,d.title,d.description||'',d.eventDate,d.startTime||null,d.endTime||null,d.color||'#6C63FF',d.allDay?1:0,d.repeatType||'none',JSON.stringify(d.location||{}),JSON.stringify(d.attachments||[]),agora(),d.id]);return (await query('SELECT * FROM calendar_events WHERE id=?',[d.id]))[0];},
+    async delete(id){await run('DELETE FROM calendar_events WHERE id=?',[id]);return {success:true};}
+  };
+
+  const settings = {
+    async get(userId){const [s]=await query('SELECT * FROM settings WHERE user_id=?',[userId]);return s?{...s,data:json(s.data,{})}:null;},
+    async save(d){await run(`INSERT INTO settings(user_id,theme,accent_color,font_size,language,notifications_enabled,sound_enabled,timeline_direction,sidebar_collapsed,data) VALUES(?,?,?,?,?,?,?,?,?,?) ON CONFLICT(user_id) DO UPDATE SET theme=excluded.theme,accent_color=excluded.accent_color,font_size=excluded.font_size,language=excluded.language,notifications_enabled=excluded.notifications_enabled,sound_enabled=excluded.sound_enabled,timeline_direction=excluded.timeline_direction,sidebar_collapsed=excluded.sidebar_collapsed,data=excluded.data`,[d.userId,d.theme||'dark',d.accentColor||'#6C63FF',d.fontSize||'medium',d.language||'pt-BR',d.notificationsEnabled===false?0:1,d.soundEnabled===false?0:1,d.timelineDirection||'asc',d.sidebarCollapsed?1:0,JSON.stringify(d.data||{})]);return {success:true};}
+  };
+
+  const demands = {
+    async getAll(userId){const rows=await query(`SELECT d.*,(SELECT count(*) FROM demand_steps s WHERE s.demand_id=d.id) steps_count FROM demands d WHERE user_id=? ORDER BY created_at DESC`,[userId]);return rows.map(d=>({...d,tags:json(d.tags,[])}));},
+    async getOne(id){const [d]=await query('SELECT * FROM demands WHERE id=?',[id]);if(!d)return null;return {...d,tags:json(d.tags,[]),steps:await query('SELECT * FROM demand_steps WHERE demand_id=? ORDER BY step_order',[id])};},
+    async create(d){const id=uuid(),t=agora();await run('INSERT INTO demands(id,user_id,title,description,status,priority,color,tags,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?)',[id,d.userId,d.title||'Sem título',d.description||'',d.status||'pending',d.priority||'normal',d.color||'default',JSON.stringify(d.tags||[]),t,t]);for(const [i,s] of (d.steps||[]).entries())await run('INSERT INTO demand_steps(id,demand_id,step_order,title,content,image_data,created_at) VALUES(?,?,?,?,?,?,?)',[uuid(),id,i+1,s.title||'',s.content||'',s.image_data||'',t]);return demands.getOne(id);},
+    async update(d){await run('UPDATE demands SET title=?,description=?,status=?,priority=?,color=?,tags=?,updated_at=? WHERE id=?',[d.title,d.description||'',d.status||'pending',d.priority||'normal',d.color||'default',JSON.stringify(d.tags||[]),agora(),d.id]);if(d.steps!==undefined){await run('DELETE FROM demand_steps WHERE demand_id=?',[d.id]);for(const [i,s] of (d.steps||[]).entries())await run('INSERT INTO demand_steps(id,demand_id,step_order,title,content,image_data,created_at) VALUES(?,?,?,?,?,?,?)',[uuid(),d.id,i+1,s.title||'',s.content||'',s.image_data||'',agora()]);}return demands.getOne(d.id);},
+    async delete(id){await run('DELETE FROM demands WHERE id=?',[id]);return {success:true};}
+  };
+
+  const chat = {
+    async getConversations(userId){return query(`SELECT c.*,(SELECT content FROM chat_messages m WHERE m.conversation_id=c.id ORDER BY created_at DESC LIMIT 1) last_message FROM chat_conversations c WHERE user_id=? AND is_archived=0 ORDER BY is_pinned DESC,updated_at DESC`,[userId]);},
+    async getConversation(id){const [c]=await query('SELECT * FROM chat_conversations WHERE id=?',[id]);return c?{...c,messages:await query('SELECT * FROM chat_messages WHERE conversation_id=? ORDER BY created_at',[id])}:null;},
+    async createConversation(d){const id=uuid(),t=agora();await run('INSERT INTO chat_conversations(id,user_id,title,created_at,updated_at) VALUES(?,?,?,?,?)',[id,d.userId,d.title||'Nova conversa',t,t]);return {id,title:d.title||'Nova conversa',is_pinned:0,is_archived:0};},
+    async deleteConversation(id,userId){await run('DELETE FROM chat_conversations WHERE id=? AND user_id=?',[id,userId]);return {success:true};},
+    async updateConversation(d){if(d.title!==undefined)await run('UPDATE chat_conversations SET title=?,updated_at=? WHERE id=?',[d.title,agora(),d.id]);if(d.is_pinned!==undefined)await run('UPDATE chat_conversations SET is_pinned=? WHERE id=?',[d.is_pinned?1:0,d.id]);if(d.is_archived!==undefined)await run('UPDATE chat_conversations SET is_archived=? WHERE id=?',[d.is_archived?1:0,d.id]);return {success:true};},
+    async addMessage(d){const id=uuid(),t=agora();await run('INSERT INTO chat_messages(id,conversation_id,role,content,created_at) VALUES(?,?,?,?,?)',[id,d.conversationId,d.role,d.content||'',t]);await run('UPDATE chat_conversations SET updated_at=? WHERE id=?',[t,d.conversationId]);return {id,conversationId:d.conversationId,role:d.role,content:d.content||'',created_at:t};},
+    async getHistory(id){return query('SELECT * FROM chat_messages WHERE conversation_id=? ORDER BY created_at',[id]);}
+  };
+
+  const users = {
+    async sendMessage(d){const id=uuid();await run('INSERT INTO user_messages(id,from_user_id,to_user_id,content,file_name,file_data,file_type,created_at) VALUES(?,?,?,?,?,?,?,?)',[id,d.fromUserId,d.toUserId,d.content||'',d.fileName||'',d.fileData||'',d.fileType||'',agora()]);return {success:true,id};},
+    async getMessages(a,b){return query('SELECT * FROM user_messages WHERE (from_user_id=? AND to_user_id=?) OR (from_user_id=? AND to_user_id=?) ORDER BY created_at',[a,b,b,a]);},
+    async getConversations(userId){return query(`SELECT DISTINCT CASE WHEN from_user_id=? THEN to_user_id ELSE from_user_id END other_user_id FROM user_messages WHERE from_user_id=? OR to_user_id=?`,[userId,userId,userId]);},
+    async deleteMessage(id){await run('DELETE FROM user_messages WHERE id=?',[id]);return {success:true};},
+    async blockUser({userId,blockUserId}){await run('UPDATE user_messages SET is_blocked=1 WHERE (from_user_id=? AND to_user_id=?) OR (from_user_id=? AND to_user_id=?)',[userId,blockUserId,blockUserId,userId]);return {success:true};},
+    async archiveChat({userId,otherUserId}){await run('UPDATE user_messages SET is_archived=1 WHERE (from_user_id=? AND to_user_id=?) OR (from_user_id=? AND to_user_id=?)',[userId,otherUserId,otherUserId,userId]);return {success:true};},
+    async shareItem(d){const id=uuid();await run('INSERT INTO shared_items(id,from_user_id,to_user_id,item_type,item_data,created_at) VALUES(?,?,?,?,?,?)',[id,d.fromUserId,d.toUserId,d.itemType,d.itemData,agora()]);return {success:true,id};},
+    async getSharedItems(userId){return query('SELECT s.*,u.display_name from_name FROM shared_items s JOIN users u ON u.id=s.from_user_id WHERE to_user_id=? ORDER BY s.created_at DESC',[userId]);}
+  };
+
+  const files = {
+    async save({fileName,data,userId}){if(!Filesystem)return {success:false,error:'Filesystem Android indisponível'};const ext=(String(fileName).match(/\.[A-Za-z0-9]{1,10}$/)||[''])[0];const savedName=`${uuid()}${ext}`;const path=`lumina/${userId}/${savedName}`;await Filesystem.writeFile({path,data,directory:'DATA',recursive:true});const uri=await Filesystem.getUri({path,directory:'DATA'});return {success:true,path:uri.uri,savedName,relativePath:path};},
+    async getPath({userId,savedName}){const path=`lumina/${userId}/${savedName}`;const uri=await Filesystem.getUri({path,directory:'DATA'});return uri.uri;},
+    async delete(filePath){try{const rel=String(filePath).includes('/lumina/')?'lumina/'+String(filePath).split('/lumina/')[1]:filePath;await Filesystem.deleteFile({path:rel,directory:'DATA'});return {success:true};}catch(e){return {success:false,error:e.message};}},
+    async open(){return {success:false,error:'Use o visualizador interno ou Compartilhar no Android'};},
+    async readAsBase64(filePath){try{const r=await Filesystem.readFile({path:filePath,directory:'DATA'});return {success:true,data:r.data};}catch(e){return {success:false,error:e.message};}}
+  };
+
+  const dataApi = {
+    async export(userId){try{const payload={format:'lumina-mobile-v2',version:2,exportedAt:agora(),users:await query('SELECT id,username,email,display_name,avatar_color,avatar_photo,bio,birthday,city,state,country,zip_code,address,latitude,longitude,created_at,last_login FROM users WHERE id=?',[userId]),notes:await query('SELECT * FROM notes WHERE user_id=?',[userId]),reminders:await query('SELECT * FROM reminders WHERE user_id=?',[userId]),events:await query('SELECT * FROM calendar_events WHERE user_id=?',[userId]),demands:await query('SELECT * FROM demands WHERE user_id=?',[userId]),settings:await query('SELECT * FROM settings WHERE user_id=?',[userId])};const fileName=`lumina-backup-${Date.now()}.lmn.json`;await Filesystem.writeFile({path:fileName,data:JSON.stringify(payload),directory:'CACHE'});const uri=await Filesystem.getUri({path:fileName,directory:'CACHE'});if(Share)await Share.share({title:'Backup Lumina Notes',url:uri.uri,dialogTitle:'Salvar ou compartilhar backup'});return {success:true,path:uri.uri};}catch(e){return {success:false,error:e.message};}},
+    async import(){return {success:false,canceled:true,error:'No Android, selecione um backup pela interface móvel de importação.'};},
+    async importPayload(){return {success:false,error:'Importação transacional será habilitada após validação do formato do arquivo selecionado.'};}
+  };
+
+  const alarms = {
+    async getAll(userId){const rows=await query('SELECT * FROM alarms WHERE user_id=? ORDER BY alarm_time',[userId]);return rows.map(a=>({...a,repeat_days:json(a.repeat_days,[]),enabled:bool(a.enabled),vibrate:bool(a.vibrate)}));},
+    async create(d){const id=uuid(),t=agora();await run('INSERT INTO alarms(id,user_id,title,alarm_time,repeat_days,sound,vibrate,enabled,snooze_minutes,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?)',[id,d.userId,d.title,d.alarmTime,JSON.stringify(d.repeatDays||[]),d.sound||'default',d.vibrate===false?0:1,d.enabled===false?0:1,d.snoozeMinutes||10,t,t]);const [a]=await query('SELECT * FROM alarms WHERE id=?',[id]);await agendarAlarme(a);return a;},
+    async update(d){await run('UPDATE alarms SET title=?,alarm_time=?,repeat_days=?,sound=?,vibrate=?,enabled=?,snooze_minutes=?,updated_at=? WHERE id=?',[d.title,d.alarmTime,JSON.stringify(d.repeatDays||[]),d.sound||'default',d.vibrate===false?0:1,d.enabled===false?0:1,d.snoozeMinutes||10,agora(),d.id]);const [a]=await query('SELECT * FROM alarms WHERE id=?',[d.id]);if(a.enabled)await agendarAlarme(a);else if(LocalNotifications)await LocalNotifications.cancel({notifications:[{id:notificacaoId('alarm',a.id)}]});return a;},
+    async delete(id){if(LocalNotifications)await LocalNotifications.cancel({notifications:[{id:notificacaoId('alarm',id)}]}).catch(()=>{});await run('DELETE FROM alarms WHERE id=?',[id]);return {success:true};}
+  };
+
+  const secrets = {
+    async setApiKey(value){if(!Secure)return {success:false,error:'Armazenamento seguro indisponível'};await Secure.set({key:API_KEY,value:String(value||'')});return {success:true};},
+    async getApiKey(){if(!Secure)return {success:false};try{const r=await Secure.get({key:API_KEY});return {success:true,value:r.value||''};}catch{return {success:false};}},
+    async removeApiKey(){if(Secure)await Secure.remove({key:API_KEY});return {success:true};}
+  };
+
+  async function chaveAI(recebida){const segura=await secrets.getApiKey();return segura.value||recebida||'';}
+  const ai = {
+    async refine(text,provided){const key=await chaveAI(provided);if(!key)return {success:false,error:'Configure sua chave de IA nas configurações'};return chamarIA([{role:'user',content:`Revise e organize o texto abaixo em português do Brasil. Preserve o significado e retorne somente o texto final.\n\n${text}`}],key);},
+    async chat(messages,provided){const key=await chaveAI(provided);if(!key)return {success:false,error:'Configure sua chave de IA nas configurações'};return chamarIA(messages,key);}
+  };
+  async function chamarIA(messages,key){try{const r=await fetch('https://api.deepseek.com/v1/chat/completions',{method:'POST',headers:{'Content-Type':'application/json','Authorization':`Bearer ${key}`},body:JSON.stringify({model:'deepseek-chat',messages,temperature:.4,max_tokens:2500})});const j=await r.json();if(!r.ok||j.error)return {success:false,error:j.error?.message||`Erro HTTP ${r.status}`};return {success:true,text:j.choices?.[0]?.message?.content||''};}catch(e){return {success:false,error:e.message};}}
+
+  const native = {
+    async shareNote(note){if(!Share)return {success:false,error:'Compartilhamento indisponível'};const text=`${note.title||'Sem título'}\n\n${note.content||''}`.trim();await Share.share({title:note.title||'Lumina Notes',text,dialogTitle:'Compartilhar nota'});return {success:true};},
+    async location(){if(!Geolocation)return {success:false,error:'Geolocalização indisponível'};let p=await Geolocation.checkPermissions();if(p.location!=='granted'&&p.coarseLocation!=='granted')p=await Geolocation.requestPermissions();if(p.location!=='granted'&&p.coarseLocation!=='granted')return {success:false,error:'Permissão de localização negada'};const pos=await Geolocation.getCurrentPosition({enableHighAccuracy:true,timeout:12000});return {success:true,latitude:pos.coords.latitude,longitude:pos.coords.longitude,accuracy:pos.coords.accuracy};},
+    async haptic(){try{await Haptics?.impact({style:'LIGHT'});}catch{}return {success:true};}
+  };
+
+  const search = {
+    async global(userId,text){const q=`%${String(text||'').replace(/[%_]/g,'')}%`;const [n,r,e,d,c]=await Promise.all([query(`SELECT id,title,content,'note' kind,updated_at date FROM notes WHERE user_id=? AND deleted_at IS NULL AND (title LIKE ? OR content LIKE ?) LIMIT 40`,[userId,q,q]),query(`SELECT id,title,description content,'reminder' kind,remind_at date FROM reminders WHERE user_id=? AND (title LIKE ? OR description LIKE ?) LIMIT 30`,[userId,q,q]),query(`SELECT id,title,description content,'event' kind,event_date date FROM calendar_events WHERE user_id=? AND (title LIKE ? OR description LIKE ?) LIMIT 30`,[userId,q,q]),query(`SELECT id,title,description content,'demand' kind,updated_at date FROM demands WHERE user_id=? AND (title LIKE ? OR description LIKE ?) LIMIT 30`,[userId,q,q]),query(`SELECT id,title,'' content,'conversation' kind,updated_at date FROM chat_conversations WHERE user_id=? AND title LIKE ? LIMIT 30`,[userId,q])]);return [...n,...r,...e,...d,...c];}
+  };
+
+  const api = {
+    platform: { kind:'android', isNative:true, ready: abrirBanco },
+    window: { minimize:async()=>{},maximize:async()=>{},close:async()=>{},hideToTray:async()=>{},quit:async()=>{} },
+    auth, notes, reminders, calendar, demands, chat, users, files, data:dataApi, settings, ai, alarms, secrets, native, search,
+    network: { async start(){return {success:false,error:'A descoberta LAN do desktop não é exposta silenciosamente no Android; requer transporte móvel autenticado.'};},async getPeers(){return [];},async sendToPeer(){return {success:false,error:'Transporte LAN móvel não configurado'};} },
+    dialog: { async openFile(){return {canceled:true,filePaths:[],mobile:true};},async saveFile(){return {canceled:true,mobile:true};} },
+    reminder: { openNote:id=>emitir('navigate:note',id),dismiss:()=>{} },
+    on(canal,cb){if(!eventos.has(canal))eventos.set(canal,new Set());eventos.get(canal).add(cb);},
+    off(canal,cb){eventos.get(canal)?.delete(cb);}
+  };
+
+  abrirBanco().then(() => {
+    window.__luminaMobileResolve?.(api);
+    window.dispatchEvent(new CustomEvent('lumina:mobile-ready'));
+    console.log('[Lumina] Adaptador Android pronto');
+  }).catch(err => {
+    console.error('[Lumina Android] Falha de inicialização', err);
+    window.__luminaMobileReject?.(err);
+  });
+})();

@@ -27,12 +27,20 @@ jobs:
           set -euo pipefail
           find src scripts -name '*.js' -print0 | xargs -0 -n1 node --check
           node -e "JSON.parse(require('fs').readFileSync('package.json')); JSON.parse(require('fs').readFileSync('capacitor.config.json'));"
+      - name: Validar bootstrap Android corrigido
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -f src/renderer/js/mobile-platform-v2.js
+          grep -F "runRaw('INSERT OR IGNORE INTO schema_migrations" src/renderer/js/mobile-platform-v2.js
+          grep -F "window.dispatchEvent(new CustomEvent('lumina:mobile-ready'))" src/renderer/js/mobile-platform-v2.js
+          grep -F "mobile-platform-v2.js" src/renderer/js/users.js
 
   android-apk:
-    name: Android APK instalável
+    name: Android APK + boot real
     runs-on: ubuntu-latest
     needs: static-qa
-    timeout-minutes: 30
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -65,6 +73,49 @@ jobs:
           cp "$APK" Lumina-Notes.apk
           sha256sum Lumina-Notes.apk | tee Lumina-Notes.apk.sha256
           ls -lh Lumina-Notes.apk
+      - name: Instalar, abrir e confirmar bootstrap no Android
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 35
+          target: google_apis
+          arch: x86_64
+          profile: pixel_6
+          disable-animations: true
+          script: |
+            set -euo pipefail
+            adb logcat -c
+            adb install -r Lumina-Notes.apk
+            adb shell am force-stop com.lumina.notes
+            adb shell am start -W -n com.lumina.notes/.MainActivity
+            BOOT_OK=0
+            for i in $(seq 1 25); do
+              if adb logcat -d | grep -F "[Lumina] Android v2.1 pronto" >/dev/null; then
+                BOOT_OK=1
+                break
+              fi
+              sleep 1
+            done
+            adb logcat -d > lumina-android-logcat.txt
+            PID=$(adb shell pidof com.lumina.notes | tr -d '\r' || true)
+            test -n "$PID"
+            if grep -E "FATAL EXCEPTION|Process: com\.lumina\.notes.*has died" lumina-android-logcat.txt; then
+              echo "Falha nativa detectada no logcat"
+              exit 1
+            fi
+            if [ "$BOOT_OK" -ne 1 ]; then
+              echo "O app abriu, mas o bootstrap não chegou a 100%."
+              grep -E "Lumina|chromium|Capacitor|SQLite" lumina-android-logcat.txt | tail -n 250 || true
+              exit 1
+            fi
+            echo "Bootstrap Android confirmado: 100% e processo ativo ($PID)."
+      - name: Publicar log do teste Android
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: Lumina-Android-smoke-log
+          path: lumina-android-logcat.txt
+          if-no-files-found: ignore
+          retention-days: 14
       - name: Publicar APK
         uses: actions/upload-artifact@v4
         with:

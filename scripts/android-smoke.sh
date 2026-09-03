@@ -77,19 +77,51 @@ for node in root.iter('node'):
     found.append(((x1+x2)//2, (y1+y2)//2))
 if not found:
     sys.exit(2)
-# Para textos repetidos como "Entrar", o controle de ação fica mais abaixo.
 x,y = max(found, key=lambda p: p[1]) if mode == 'text' else found[0]
 print(f'{x} {y}')
 PY
 }
 
+dismiss_system_overlays() {
+  # Runners headless podem exibir ANR do Pixel Launcher/System UI por cima do app.
+  # Esses alertas pertencem ao Android do emulador, não ao Lumina.
+  for _ in $(seq 1 5); do
+    dump_ui || true
+    if ! grep -Eqi "isn't responding|is not responding|Close app|Wait|System UI" "$UI_FILE" 2>/dev/null; then
+      return 0
+    fi
+    local pos=""
+    if pos="$(node_center text 'Wait' 2>/dev/null)"; then
+      read -r x y <<<"$pos"
+      adb shell input tap "$x" "$y"
+    elif pos="$(node_center text 'Close app' 2>/dev/null)"; then
+      read -r x y <<<"$pos"
+      adb shell input tap "$x" "$y"
+    else
+      adb shell input keyevent KEYCODE_BACK || true
+    fi
+    sleep 2
+    adb shell am start -n "$ACTIVITY" >/dev/null || true
+    sleep 1
+  done
+}
+
 # Teste funcional real: não basta o processo estar vivo; a tela precisa aceitar toque e digitação.
 sleep 1
+dismiss_system_overlays
 dump_ui
+
+if grep -Eqi "isn't responding|is not responding|Close app|Wait" "$UI_FILE"; then
+  echo "Falha de infraestrutura: um alerta do Android continuou cobrindo o Lumina."
+  cat "$UI_FILE" || true
+  exit 2
+fi
+
 if ONBOARDING_POS="$(node_center text 'Começar' 2>/dev/null)"; then
   read -r OX OY <<<"$ONBOARDING_POS"
   adb shell input tap "$OX" "$OY"
   sleep 1
+  dismiss_system_overlays
   dump_ui
 fi
 
@@ -103,6 +135,7 @@ adb shell input tap "$UX" "$UY"
 sleep 1
 adb shell input text 'lumina_smoke'
 sleep 1
+dismiss_system_overlays
 dump_ui
 if ! grep -F 'lumina_smoke' "$UI_FILE" >/dev/null; then
   echo "Falha: o toque chegou à tela, mas o campo de login não aceitou digitação."
@@ -112,6 +145,7 @@ fi
 
 adb shell input keyevent KEYCODE_BACK || true
 sleep 1
+dismiss_system_overlays
 dump_ui
 if ! LOGIN_POS="$(node_center text 'Entrar' 2>/dev/null)"; then
   echo "Falha: botão Entrar não foi encontrado pela camada de acessibilidade."
@@ -121,6 +155,7 @@ fi
 read -r LX LY <<<"$LOGIN_POS"
 adb shell input tap "$LX" "$LY"
 sleep 1
+dismiss_system_overlays
 dump_ui
 if ! grep -F 'Preencha todos os campos' "$UI_FILE" >/dev/null; then
   echo "Falha: botão Entrar não respondeu ao toque como esperado."

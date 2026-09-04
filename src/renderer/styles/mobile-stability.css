@@ -343,4 +343,19 @@ html.lumina-native .danger { color: var(--danger) !important; }
   html.lumina-native .demand-card-actions,
   html.lumina-native .history-actions { justify-content: flex-start; }
   html.lumina-native .mobile-parity-row { grid-template-columns: 1fr; }
+
+  /* O HTML herdado possui page-users dentro de page-chat. Quando Usuários estiver ativo,
+     mostramos o contêiner pai e escondemos somente a interface da IA. */
+  html.lumina-native #page-chat:has(#page-users.active) {
+    display: flex !important;
+    flex-direction: column !important;
+    padding: 18px 16px 100px !important;
+  }
+  html.lumina-native #page-chat:has(#page-users.active) > .chat-layout {
+    display: none !important;
+  }
+  html.lumina-native #page-chat:has(#page-users.active) #page-users.active {
+    display: flex !important;
+    width: 100% !important;
+  }
 }

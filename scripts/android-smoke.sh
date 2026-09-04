@@ -12,6 +12,14 @@ adb logcat -c
 adb install -r Lumina-Notes.apk
 adb shell am force-stop "$PACKAGE"
 
+# O launcher do Pixel do runner costuma entrar em ANR sem relação com o Lumina.
+# Mantê-lo parado evita que um diálogo do sistema cubra o WebView durante o teste.
+stop_unstable_launcher() {
+  adb shell am force-stop com.google.android.apps.nexuslauncher >/dev/null 2>&1 || true
+  adb shell am force-stop com.android.launcher3 >/dev/null 2>&1 || true
+}
+stop_unstable_launcher
+
 START_OUTPUT="$(adb shell am start -W -n "$ACTIVITY")"
 printf '%s\n' "$START_OUTPUT"
 printf '%s\n' "$START_OUTPUT" | grep -F "Status: ok" >/dev/null
@@ -106,24 +114,27 @@ PY
 dismiss_system_overlays() {
   # Runners headless podem exibir ANR do Pixel Launcher/System UI por cima do app.
   # Esses alertas pertencem ao Android do emulador, não ao Lumina.
-  for _ in $(seq 1 5); do
+  for _ in $(seq 1 8); do
     dump_ui || true
     if ! grep -Eqi "isn't responding|is not responding|Close app|Wait|System UI" "$UI_FILE" 2>/dev/null; then
       return 0
     fi
     local pos=""
-    if pos="$(node_center text 'Wait' 2>/dev/null)"; then
+    # Fechar o launcher é mais estável que escolher "Wait", que costuma recriar o ANR.
+    if pos="$(node_center text 'Close app' 2>/dev/null)"; then
       read -r x y <<<"$pos"
       adb shell input tap "$x" "$y"
-    elif pos="$(node_center text 'Close app' 2>/dev/null)"; then
+    elif pos="$(node_center text 'Wait' 2>/dev/null)"; then
       read -r x y <<<"$pos"
       adb shell input tap "$x" "$y"
     else
       adb shell input keyevent KEYCODE_BACK || true
     fi
-    sleep 2
-    adb shell am start -n "$ACTIVITY" >/dev/null || true
+    stop_unstable_launcher
     sleep 1
+    adb shell am force-stop "$PACKAGE" >/dev/null 2>&1 || true
+    adb shell am start -n "$ACTIVITY" >/dev/null || true
+    sleep 2
   done
 }
 

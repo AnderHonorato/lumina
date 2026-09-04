@@ -57,32 +57,48 @@ node_center() {
 import re, sys, xml.etree.ElementTree as ET
 path, mode, needle = sys.argv[1:4]
 root = ET.parse(path).getroot()
-found = []
+records = []
 for node in root.iter('node'):
     text = ' '.join(filter(None, [node.attrib.get('text',''), node.attrib.get('content-desc',''), node.attrib.get('resource-id','')]))
     klass = node.attrib.get('class','')
-    ok = False
-    if mode in ('text', 'text_top'):
-        ok = needle.casefold() in text.casefold()
-    elif mode == 'edit':
-        ok = 'EditText' in klass or node.attrib.get('editable') == 'true'
-    if not ok:
-        continue
     m = re.fullmatch(r'\[(\d+),(\d+)\]\[(\d+),(\d+)\]', node.attrib.get('bounds',''))
     if not m:
         continue
     x1,y1,x2,y2 = map(int, m.groups())
     if x2 <= x1 or y2 <= y1:
         continue
-    found.append(((x1+x2)//2, (y1+y2)//2))
-if not found:
-    sys.exit(2)
-if mode == 'text_top':
-    x,y = min(found, key=lambda p: p[1])
-elif mode == 'text':
-    x,y = max(found, key=lambda p: p[1])
-else:
+    records.append({
+        'text': text,
+        'klass': klass,
+        'editable': node.attrib.get('editable') == 'true' or 'EditText' in klass,
+        'x': (x1+x2)//2,
+        'y': (y1+y2)//2,
+    })
+
+if mode in ('text', 'text_top'):
+    found = [(r['x'], r['y']) for r in records if needle.casefold() in r['text'].casefold()]
+    if not found:
+        sys.exit(2)
+    x,y = min(found, key=lambda p: p[1]) if mode == 'text_top' else max(found, key=lambda p: p[1])
+elif mode == 'edit':
+    found = [(r['x'], r['y']) for r in records if r['editable']]
+    if not found:
+        sys.exit(2)
     x,y = found[0]
+elif mode == 'edit_after':
+    labels = [r for r in records if needle.casefold() in r['text'].casefold() and not r['editable']]
+    edits = [r for r in records if r['editable']]
+    candidates = []
+    for label in labels:
+        for edit in edits:
+            dy = edit['y'] - label['y']
+            if 0 < dy < 220:
+                candidates.append((dy, edit['x'], edit['y']))
+    if not candidates:
+        sys.exit(2)
+    _,x,y = min(candidates)
+else:
+    sys.exit(2)
 print(f'{x} {y}')
 PY
 }
@@ -109,6 +125,25 @@ dismiss_system_overlays() {
     adb shell am start -n "$ACTIVITY" >/dev/null || true
     sleep 1
   done
+}
+
+fill_after_label() {
+  local label="$1"
+  local value="$2"
+  dump_ui
+  local pos
+  if ! pos="$(node_center edit_after "$label" 2>/dev/null)"; then
+    echo "Falha: campo após '$label' não foi encontrado."
+    cat "$UI_FILE" || true
+    exit 1
+  fi
+  read -r x y <<<"$pos"
+  adb shell input tap "$x" "$y"
+  sleep 1
+  adb shell input text "$value"
+  sleep 1
+  adb shell input keyevent KEYCODE_BACK || true
+  sleep 1
 }
 
 # Teste funcional real: não basta o processo estar vivo; a tela precisa aceitar toque e digitação.
@@ -201,6 +236,70 @@ if ! grep -F 'Preencha todos os campos' "$UI_FILE" >/dev/null; then
   exit 1
 fi
 
-echo "Interação Android confirmada: abas de autenticação, campo editável e botão Entrar responderam."
+# Cadastro real para validar a interface depois de autenticada.
+if ! REGISTER_TAB_POS="$(node_center text_top 'Criar conta' 2>/dev/null)"; then
+  echo "Falha: aba Criar conta sumiu antes do cadastro real."
+  exit 1
+fi
+read -r RTX RTY <<<"$REGISTER_TAB_POS"
+adb shell input tap "$RTX" "$RTY"
+sleep 1
+dismiss_system_overlays
+
+fill_after_label 'Nome de exibição' 'LuminaTeste'
+fill_after_label 'Usuário' 'lumina_ci_user'
+fill_after_label 'Senha' 'Lumina12345'
+dump_ui
+
+if ! CREATE_POS="$(node_center text 'Criar conta' 2>/dev/null)"; then
+  echo "Falha: botão Criar conta não foi encontrado após preencher cadastro."
+  cat "$UI_FILE" || true
+  exit 1
+fi
+read -r CX CY <<<"$CREATE_POS"
+adb shell input tap "$CX" "$CY"
+sleep 3
+dismiss_system_overlays
+dump_ui
+
+if ! grep -F 'Mais' "$UI_FILE" >/dev/null; then
+  echo "Falha: cadastro concluiu, mas a navegação mobile completa não apareceu."
+  cat "$UI_FILE" || true
+  exit 1
+fi
+
+# O botão Mais precisa expor os recursos que antes ficavam escondidos pela sidebar desktop.
+if ! MORE_POS="$(node_center text 'Mais' 2>/dev/null)"; then
+  echo "Falha: botão Mais não ficou acessível."
+  exit 1
+fi
+read -r MX MY <<<"$MORE_POS"
+adb shell input tap "$MX" "$MY"
+sleep 1
+dump_ui
+for ITEM in 'Todos os recursos' 'Lembretes' 'Demandas' 'Histórico' 'Usuários' 'IA' 'Busca' 'Alarmes' 'Lixeira' 'Configurações' 'Backup'; do
+  if ! grep -F "$ITEM" "$UI_FILE" >/dev/null; then
+    echo "Falha: recurso '$ITEM' não apareceu no menu mobile completo."
+    cat "$UI_FILE" || true
+    exit 1
+  fi
+done
+
+# Abrir Demandas confirma que a navegação pós-login executa ação real.
+if ! DEMAND_POS="$(node_center text 'Demandas' 2>/dev/null)"; then
+  echo "Falha: Demandas não ficou clicável no menu Mais."
+  exit 1
+fi
+read -r DX DY <<<"$DEMAND_POS"
+adb shell input tap "$DX" "$DY"
+sleep 1
+dump_ui
+if ! grep -F 'Nova demanda' "$UI_FILE" >/dev/null; then
+  echo "Falha: tela de Demandas não abriu depois do login."
+  cat "$UI_FILE" || true
+  exit 1
+fi
+
+echo "Interação Android confirmada: login/cadastro, digitação, navegação pós-login e menu completo responderam."
 echo "Bootstrap Android confirmado: 100% e processo ativo ($PID)."
 grep -F "$MARKER" "$LOG_FILE" | tail -n 5 || true

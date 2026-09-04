@@ -32,7 +32,7 @@
 
   function waitForApp() {
     if (initialized) return;
-    if (!window.App || !window.lumina || !$('#mobile-bottom-nav')) {
+    if (typeof App === 'undefined' || !window.lumina || !$('#mobile-bottom-nav')) {
       setTimeout(waitForApp, 80);
       return;
     }

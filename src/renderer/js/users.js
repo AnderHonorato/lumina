@@ -45,6 +45,8 @@
   document.documentElement.classList.add('lumina-native', 'lumina-android');
   const css = document.createElement('link');
   css.rel = 'stylesheet'; css.href = 'styles/mobile.css'; document.head.appendChild(css);
+  const stableCss = document.createElement('link');
+  stableCss.rel = 'stylesheet'; stableCss.href = 'styles/mobile-stability.css'; document.head.appendChild(stableCss);
 
   let uiLoaded = false;
   const loadMobileUI = () => {
@@ -52,6 +54,12 @@
     uiLoaded = true;
     const ui = document.createElement('script');
     ui.src = 'js/mobile-ui.js';
+    ui.onload = () => {
+      const parity = document.createElement('script');
+      parity.src = 'js/mobile-parity.js';
+      parity.onerror = () => window.__luminaBootFail?.(new Error('Não foi possível carregar a paridade funcional Android'), 'Recursos Android');
+      document.head.appendChild(parity);
+    };
     ui.onerror = () => window.__luminaBootFail?.(new Error('Não foi possível carregar a interface móvel'), 'Interface móvel');
     document.head.appendChild(ui);
   };

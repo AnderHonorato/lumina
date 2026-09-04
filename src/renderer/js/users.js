@@ -70,6 +70,31 @@
 (function attachUsersModule() {
   if (typeof App === 'undefined') { setTimeout(attachUsersModule, 50); return; }
 
+  App.ui.switchAuthTab = function(tab) {
+    const target = tab === 'register' ? 'register' : 'login';
+    const isLogin = target === 'login';
+
+    document.querySelectorAll('.auth-tab').forEach(button => {
+      button.classList.toggle('active', button.dataset.tab === target);
+      button.setAttribute('aria-selected', button.dataset.tab === target ? 'true' : 'false');
+    });
+
+    const loginForm = document.getElementById('login-form');
+    const registerForm = document.getElementById('register-form');
+    loginForm?.classList.toggle('active', isLogin);
+    registerForm?.classList.toggle('active', !isLogin);
+
+    const loginError = document.getElementById('login-error');
+    const registerError = document.getElementById('register-error');
+    if (loginError) loginError.textContent = '';
+    if (registerError) registerError.textContent = '';
+
+    requestAnimationFrame(() => {
+      const firstField = document.querySelector(isLogin ? '#login-form input' : '#register-form input');
+      firstField?.focus({ preventScroll: true });
+    });
+  };
+
   const esc = value => String(value || '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
   const pinIcon = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 21s7-5.33 7-12a7 7 0 1 0-14 0c0 6.67 7 12 7 12z"/><circle cx="12" cy="9" r="2"/></svg>';
   const fileIcon = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z"/><polyline points="14 2 14 8 20 8"/></svg>';

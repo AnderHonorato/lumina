@@ -62,7 +62,7 @@ for node in root.iter('node'):
     text = ' '.join(filter(None, [node.attrib.get('text',''), node.attrib.get('content-desc',''), node.attrib.get('resource-id','')]))
     klass = node.attrib.get('class','')
     ok = False
-    if mode == 'text':
+    if mode in ('text', 'text_top'):
         ok = needle.casefold() in text.casefold()
     elif mode == 'edit':
         ok = 'EditText' in klass or node.attrib.get('editable') == 'true'
@@ -77,7 +77,12 @@ for node in root.iter('node'):
     found.append(((x1+x2)//2, (y1+y2)//2))
 if not found:
     sys.exit(2)
-x,y = max(found, key=lambda p: p[1]) if mode == 'text' else found[0]
+if mode == 'text_top':
+    x,y = min(found, key=lambda p: p[1])
+elif mode == 'text':
+    x,y = max(found, key=lambda p: p[1])
+else:
+    x,y = found[0]
 print(f'{x} {y}')
 PY
 }
@@ -125,6 +130,39 @@ if ONBOARDING_POS="$(node_center text 'Começar' 2>/dev/null)"; then
   dump_ui
 fi
 
+# Regressão do erro App.ui.switchAuthTab: tocar nas duas abas deve alternar os formulários.
+if ! REGISTER_TAB_POS="$(node_center text_top 'Criar conta' 2>/dev/null)"; then
+  echo "Falha: aba Criar conta não foi encontrada."
+  cat "$UI_FILE" || true
+  exit 1
+fi
+read -r RTX RTY <<<"$REGISTER_TAB_POS"
+adb shell input tap "$RTX" "$RTY"
+sleep 1
+dismiss_system_overlays
+dump_ui
+if ! grep -F 'Nome de exibição' "$UI_FILE" >/dev/null; then
+  echo "Falha: tocar na aba Criar conta não exibiu o formulário de cadastro."
+  cat "$UI_FILE" || true
+  exit 1
+fi
+
+if ! LOGIN_TAB_POS="$(node_center text_top 'Entrar' 2>/dev/null)"; then
+  echo "Falha: aba Entrar não foi encontrada."
+  cat "$UI_FILE" || true
+  exit 1
+fi
+read -r LTX LTY <<<"$LOGIN_TAB_POS"
+adb shell input tap "$LTX" "$LTY"
+sleep 1
+dismiss_system_overlays
+dump_ui
+if ! grep -F 'Usuário ou Email' "$UI_FILE" >/dev/null; then
+  echo "Falha: tocar na aba Entrar não restaurou o formulário de login."
+  cat "$UI_FILE" || true
+  exit 1
+fi
+
 if ! USER_POS="$(node_center edit 2>/dev/null)"; then
   echo "Falha: o campo de usuário/email não ficou acessível ao toque no Android."
   cat "$UI_FILE" || true
@@ -163,6 +201,6 @@ if ! grep -F 'Preencha todos os campos' "$UI_FILE" >/dev/null; then
   exit 1
 fi
 
-echo "Interação Android confirmada: campo editável recebeu toque/texto e botão Entrar respondeu."
+echo "Interação Android confirmada: abas de autenticação, campo editável e botão Entrar responderam."
 echo "Bootstrap Android confirmado: 100% e processo ativo ($PID)."
 grep -F "$MARKER" "$LOG_FILE" | tail -n 5 || true

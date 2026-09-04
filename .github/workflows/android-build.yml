@@ -41,6 +41,19 @@ jobs:
           grep -F ".screen.active" src/renderer/styles/main.css
           grep -F "pointer-events: auto" src/renderer/styles/main.css
           test "$(grep -Roh 'pointer-events: all' src/renderer/styles | wc -l)" -eq 0
+      - name: Validar regressões Android de interface
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -f src/renderer/styles/mobile-polish.css
+          grep -F "ensureTextEditor" src/renderer/js/mobile-ui.js
+          grep -F "typeof el.setRangeText==='function'" src/renderer/js/mobile-ui.js
+          grep -F "App.settings.pickPhoto" src/renderer/js/mobile-ui.js
+          grep -F "App.settings.handlePhoto" src/renderer/js/mobile-ui.js
+          grep -F "App.settings.removePhoto" src/renderer/js/mobile-ui.js
+          grep -F "installRuntimeIsolation" src/renderer/js/mobile-ui.js
+          grep -F "mobile-attachment-preview" src/renderer/js/mobile-ui.js src/renderer/styles/mobile-polish.css
+          grep -F "timeline-spine" src/renderer/styles/mobile-polish.css
 
   android-apk:
     name: Android APK + boot real
